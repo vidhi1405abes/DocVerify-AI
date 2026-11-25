@@ -27,3 +27,7 @@ backend/references/**
 *.njsproj
 *.sln
 *.sw?
+
+# Local database, secret key and environment files
+backend/instance/
+.env
