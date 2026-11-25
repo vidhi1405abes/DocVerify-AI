@@ -84,6 +84,12 @@ class PublicRouteTests(ApiTestCase):
     def test_health(self):
         self.assertEqual(self.client.get("/health").json, {"status": "ok"})
 
+    def test_allows_frontend_on_any_local_port_only(self):
+        local = self.client.get("/health", headers={"Origin": "http://localhost:5174"})
+        remote = self.client.get("/health", headers={"Origin": "http://evil.example.com"})
+        self.assertEqual(local.headers.get("Access-Control-Allow-Origin"), "http://localhost:5174")
+        self.assertIsNone(remote.headers.get("Access-Control-Allow-Origin"))
+
     def test_lists_document_types_with_required_fields(self):
         types = {t["id"]: t for t in self.client.get("/documents/types").json}
         self.assertEqual(set(types), {"marksheet10", "marksheet12", "jeeResult", "tc", "domicile", "aadhaar"})
