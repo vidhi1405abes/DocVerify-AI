@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import os
 import threading
 import uuid
 from pathlib import Path
@@ -55,7 +56,9 @@ def create_app(reference_root=None, database_url=None):
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
     app.config["SECRET_KEY"] = secret_key()
-    app.config["REFERENCE_ROOT"] = Path(reference_root or BACKEND_DIR / "references")
+    app.config["REFERENCE_ROOT"] = Path(
+        reference_root or os.environ.get("REFERENCE_ROOT") or BACKEND_DIR / "references"
+    )
     app.config["DB"] = make_session_factory(database_url or default_database_url())
     CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}})
     app.register_blueprint(auth_bp)
