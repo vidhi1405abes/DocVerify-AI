@@ -6,6 +6,10 @@ signs of editing, verifies QR codes and authorized records, and explains its ver
 **Verified**, **Requires Review** or **Suspicious**, with a 0–100 risk score.
 
 Results support a human verifier; they are not proof of official authenticity.
+
+**Privacy:** real or sample documents (marksheets, ID cards) are never committed. Keep test
+documents in `backend/IMG/`, which Git ignores.
+
 The full specification is in [requirements.pdf](requirements.pdf).
 
 ## Verification pipeline
@@ -96,7 +100,7 @@ backend/
   docverify/      app (routes), auth, models, engine (layers + risk score),
                   ocr, extract, classify, consistency, tamper, qr, doc_types
   tests/          API and verification-layer tests
-  IMG/            sample documents
+  IMG/            your local sample documents (ignored by Git, never uploaded)
 src/
   pages/          Home, Auth, Verify, Results, History, Admin (references, records)
   components/     layout, UI and document components

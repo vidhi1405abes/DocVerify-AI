@@ -31,3 +31,10 @@ backend/references/**
 # Local database, secret key and environment files
 backend/instance/
 .env
+
+# Personal / sample documents must never be committed (privacy)
+backend/IMG/
+backend/**/*.jpg
+backend/**/*.jpeg
+backend/**/*.png
+backend/**/*.pdf
