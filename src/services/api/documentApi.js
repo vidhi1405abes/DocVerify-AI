@@ -1,50 +1,34 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:5000'
+import { apiRequest } from './client'
 
-const readResponse = async (response, failureMessage) => {
-  const data = await response.json()
+export const getDocumentTypes = () => apiRequest('/documents/types')
 
-  if (!response.ok) {
-    throw new Error(data.error || `${failureMessage} (${response.status})`)
-  }
+export const verifyDocument = (formData) =>
+  apiRequest('/documents/verify', { method: 'POST', form: formData })
 
-  return data
-}
+export const getVerificationResult = (id) => apiRequest(`/documents/result/${encodeURIComponent(id)}`)
 
-export const uploadDocument = async (formData) => {
-  const response = await fetch(`${API_BASE_URL}/documents/verify`, {
-    method: 'POST',
-    body: formData,
-  })
+export const deleteVerificationResult = (id) =>
+  apiRequest(`/documents/result/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
-  return readResponse(response, 'Upload failed')
-}
+export const getHistory = (scope) =>
+  apiRequest(`/documents/history${scope === 'all' ? '?scope=all' : ''}`)
 
-export const getVerificationResult = async (id) => {
-  const response = await fetch(`${API_BASE_URL}/documents/result/${id}`)
+export const getReferenceDocuments = () => apiRequest('/documents/references')
 
-  return readResponse(response, 'Failed to fetch results')
-}
+export const uploadReferenceDocument = (formData) =>
+  apiRequest('/documents/references', { method: 'POST', form: formData })
 
-export const getReferenceDocuments = async () => {
-  const response = await fetch(`${API_BASE_URL}/documents/references`)
-
-  return readResponse(response, 'Failed to load reference documents')
-}
-
-export const uploadReferenceDocument = async (formData) => {
-  const response = await fetch(`${API_BASE_URL}/documents/references`, {
-    method: 'POST',
-    body: formData,
-  })
-
-  return readResponse(response, 'Reference upload failed')
-}
-
-export const deleteReferenceDocument = async (documentType, filename) => {
-  const response = await fetch(
-    `${API_BASE_URL}/documents/references/${encodeURIComponent(documentType)}/${encodeURIComponent(filename)}`,
+export const deleteReferenceDocument = (documentType, filename) =>
+  apiRequest(
+    `/documents/references/${encodeURIComponent(documentType)}/${encodeURIComponent(filename)}`,
     { method: 'DELETE' }
   )
 
-  return readResponse(response, 'Failed to delete reference document')
-}
+export const getRecords = () => apiRequest('/records')
+
+export const createRecord = (record) => apiRequest('/records', { method: 'POST', json: record })
+
+export const importRecords = (formData) =>
+  apiRequest('/records/import', { method: 'POST', form: formData })
+
+export const deleteRecord = (id) => apiRequest(`/records/${id}`, { method: 'DELETE' })
