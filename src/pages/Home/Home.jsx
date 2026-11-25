@@ -1,131 +1,91 @@
-import { useNavigate } from 'react-router-dom';
-import { Shield, FileCheck, Clock, School } from 'lucide-react';
-import '../../pages/Home/index.css'
+import { Link } from 'react-router-dom'
+import { Calculator, FileSearch, Fingerprint, QrCode, ScanText, ShieldCheck } from 'lucide-react'
+import { useAuth } from '@/context/useAuth'
+
+const LAYERS = [
+  { icon: ScanText, title: 'OCR & information extraction', text: 'Cleans up the image, reads the text and pulls out names, roll numbers, dates and marks.' },
+  { icon: FileSearch, title: 'Classification & structure', text: 'Recognises the document type and checks that every required field is present.' },
+  { icon: Calculator, title: 'Data consistency', text: 'Marks must add up, totals must match the total in words, and dates must be in order.' },
+  { icon: Fingerprint, title: 'Tampering detection', text: 'Flags values printed in a different size, ink or background, and files saved by editing tools.' },
+  { icon: QrCode, title: 'QR & record verification', text: 'Decodes QR codes and compares the document with authorized records and genuine references.' },
+  { icon: ShieldCheck, title: 'Explainable risk score', text: 'Combines every check into a 0–100 risk score with the reasons behind the result.' },
+]
+
+const PIPELINE = ['Upload', 'Preprocess', 'Classify', 'OCR', 'Extract', 'Structure', 'Consistency', 'Tampering', 'QR / ID', 'Records', 'Risk score', 'Result']
+
+const OUTCOMES = [
+  { label: 'Verified', className: 'border-green-200 bg-green-50 text-green-900', text: 'Most checks passed and nothing suspicious was found.' },
+  { label: 'Requires Review', className: 'border-amber-200 bg-amber-50 text-amber-900', text: 'The system cannot decide confidently, so a person should inspect it.' },
+  { label: 'Suspicious', className: 'border-red-200 bg-red-50 text-red-900', text: 'Checks point to manipulation, inconsistent data or a record mismatch.' },
+]
 
 export default function Home() {
-  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth()
+  const start = isAuthenticated ? '/verify' : '/register'
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
-      {/* Hero Section */}
-      <section className="py-20 px-4">
-        <div className="max-w-6xl mx-auto text-center">
-          <h1 className="text-5xl font-bold text-gray-900 mb-6">
-            Compare Academic Documents Against Genuine References
-          </h1>
-          <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
-            Use local OCR to compare uploaded documents with reference documents you provide.
-            Text similarity is a comparison aid, not proof of official authenticity.
-          </p>
-          <button 
-            onClick={() => navigate('/upload')}
-            className="bg-blue-600 text-white px-8 py-4 rounded-lg text-lg font-medium hover:bg-blue-700 transition-colors"
-          >
-            Start Verification
-          </button>
+    <div>
+      <section className="py-16 text-center sm:py-20">
+        <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">Intelligent document verification</p>
+        <h1 className="mx-auto mt-3 max-w-4xl text-4xl font-bold text-gray-900 sm:text-5xl">
+          Catch manipulated documents that still look genuine
+        </h1>
+        <p className="mx-auto mt-6 max-w-3xl text-lg text-gray-600">
+          DocVerify AI reads a document, understands its information, checks that it is consistent, looks for signs of
+          editing and compares it with authorized records, then explains its verdict.
+        </p>
+        <div className="mt-8 flex flex-wrap justify-center gap-3">
+          <Link to={start} className="rounded-lg bg-blue-600 px-8 py-3 text-lg font-medium text-white hover:bg-blue-700">
+            {isAuthenticated ? 'Verify a document' : 'Get started'}
+          </Link>
+          {!isAuthenticated && (
+            <Link to="/login" className="rounded-lg border border-gray-300 bg-white px-8 py-3 text-lg font-medium text-gray-700 hover:bg-gray-50">
+              Sign in
+            </Link>
+          )}
         </div>
       </section>
 
-      {/* Features Section */}
-      <section className="py-16 px-4">
-        <div className="max-w-6xl mx-auto">
-          <h2 className="text-3xl font-bold text-center mb-12">Key Features</h2>
-          <div className="grid md:grid-cols-3 gap-8">
-            <FeatureCard 
-              icon={<Shield className="w-12 h-12 text-blue-600" />}
-              title="OCR Reference Matching"
-              description="Compare extracted document text with a genuine reference you configure"
-            />
-            <FeatureCard 
-              icon={<Clock className="w-12 h-12 text-blue-600" />}
-              title="Clear Comparison Results"
-              description="See whether the extracted text matches a configured reference or needs review"
-            />
-            <FeatureCard 
-              icon={<FileCheck className="w-12 h-12 text-blue-600" />}
-              title="Multi-Document Support"
-              description="Verify Class 10th, 12th marksheets and JEE results in one go"
-            />
-          </div>
+      <section className="py-12">
+        <h2 className="text-center text-3xl font-bold text-gray-900">Multi-layer verification</h2>
+        <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {LAYERS.map((layer) => (
+            <div key={layer.title} className="rounded-xl bg-white p-6 shadow-sm">
+              <layer.icon className="h-10 w-10 text-blue-600" />
+              <h3 className="mt-4 text-lg font-semibold text-gray-900">{layer.title}</h3>
+              <p className="mt-2 text-gray-600">{layer.text}</p>
+            </div>
+          ))}
         </div>
       </section>
 
-      {/* How It Works Section */}
-      <section className="py-16 px-4 bg-white">
-        <div className="max-w-6xl mx-auto">
-          <h2 className="text-3xl font-bold text-center mb-12">How It Works</h2>
-          <div className="grid md:grid-cols-4 gap-4">
-            <StepCard 
-              number="1"
-              title="Upload Documents"
-              description="Upload your academic documents through our secure platform"
-            />
-            <StepCard 
-              number="2"
-              title="OCR Analysis"
-              description="Text is extracted locally from the uploaded document"
-            />
-            <StepCard 
-              number="3"
-              title="Reference Comparison"
-              description="Extracted text is compared with references you provide"
-            />
-            <StepCard 
-              number="4"
-              title="Results"
-              description="Get detailed verification results instantly"
-            />
-          </div>
-        </div>
+      <section className="py-12">
+        <h2 className="text-center text-3xl font-bold text-gray-900">How a document is checked</h2>
+        <ol className="mt-8 flex flex-wrap justify-center gap-2">
+          {PIPELINE.map((step, index) => (
+            <li key={step} className="flex items-center gap-2 rounded-full border border-blue-100 bg-white px-4 py-2 text-sm text-gray-700">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">{index + 1}</span>
+              {step}
+            </li>
+          ))}
+        </ol>
       </section>
 
-      {/* Trust Section */}
-      <section className="py-16 px-4">
-        <div className="max-w-6xl mx-auto text-center">
-          <h2 className="text-3xl font-bold mb-8">Trusted by Leading Institutions</h2>
-          <div className="grid md:grid-cols-4 gap-8 items-center">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="flex items-center justify-center">
-                <School className="w-16 h-16 text-gray-400" />
-              </div>
-            ))}
-          </div>
+      <section className="py-12">
+        <h2 className="text-center text-3xl font-bold text-gray-900">Three clear outcomes</h2>
+        <div className="mt-8 grid gap-4 md:grid-cols-3">
+          {OUTCOMES.map((outcome) => (
+            <div key={outcome.label} className={`rounded-lg border p-6 ${outcome.className}`}>
+              <h3 className="text-xl font-bold">{outcome.label}</h3>
+              <p className="mt-2">{outcome.text}</p>
+            </div>
+          ))}
         </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="py-20 px-4 bg-blue-600">
-        <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-3xl font-bold text-white mb-6">
-            Ready to Streamline Your Verification Process?
-          </h2>
-          <p className="text-lg text-blue-100 mb-8">
-            Join hundreds of institutions using our platform for secure document verification
-          </p>
-          <button 
-            onClick={() => navigate('/upload')}
-            className="bg-white text-blue-600 px-8 py-4 rounded-lg text-lg font-medium hover:bg-gray-100 transition-colors"
-          >
-            Get Started Now
-          </button>
-        </div>
+        <p className="mx-auto mt-6 max-w-3xl text-center text-sm text-gray-500">
+          Supports 10th and 12th marksheets, JEE results, transfer certificates, domicile certificates and Aadhaar cards.
+          Results support a human verifier and are not proof of official authenticity.
+        </p>
       </section>
     </div>
-  );
+  )
 }
-
-const FeatureCard = ({ icon, title, description }) => (
-  <div className="bg-white p-6 rounded-xl shadow-sm hover:shadow-md transition-shadow">
-    <div className="mb-4">{icon}</div>
-    <h3 className="text-xl font-semibold mb-2">{title}</h3>
-    <p className="text-gray-600">{description}</p>
-  </div>
-);
-
-const StepCard = ({ number, title, description }) => (
-  <div className="relative p-6">
-    <div className="text-4xl font-bold text-blue-600 mb-4">{number}</div>
-    <h3 className="text-xl font-semibold mb-2">{title}</h3>
-    <p className="text-gray-600">{description}</p>
-  </div>
-);
