@@ -3,4 +3,8 @@ Flask-Cors>=5.0,<6
 easyocr>=1.7.2,<2
 numpy>=1.26
 opencv-python-headless>=4.10,<5
+Pillow>=10
 pypdfium2>=4.30,<6
+scikit-learn>=1.4,<2
+# 2.0.x falls back to pure Python when Windows Application Control blocks its compiled modules.
+SQLAlchemy>=2.0,<2.1
