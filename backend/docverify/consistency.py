@@ -78,6 +78,9 @@ def _check_result(fields, findings):
                          min(r["confidence"] for r in failing) >= CONFIDENT)
     elif result.startswith("PASS") and rows:
         findings.ok("Result PASS agrees with the marks in every subject.")
+    elif result.startswith("FAIL") and rows and not failing:
+        findings.problem(f"Result says FAIL but every subject is at or above the pass mark of {PASS_MARK}.",
+                         min(r["confidence"] for r in rows) >= CONFIDENT)
 
     grand_total = fields.get("grandTotal")
     if grand_total and rows:

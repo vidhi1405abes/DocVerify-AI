@@ -11,6 +11,14 @@ def utcnow():
     return datetime.now(timezone.utc)
 
 
+def utc_iso(moment):
+    """ISO time with an explicit UTC offset. SQLite returns stored times without a time zone,
+    and the browser would otherwise read them as local time."""
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.isoformat()
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -51,7 +59,7 @@ class Verification(Base):
             "verdict": self.verdict,
             "verdictLabel": result.get("verdictLabel"),
             "riskScore": self.risk_score,
-            "createdAt": self.created_at.isoformat(),
+            "createdAt": utc_iso(self.created_at),
         }
 
 
@@ -80,7 +88,7 @@ class AuthorizedRecord(Base):
             "name": self.name,
             "fields": self.fields,
             "source": self.source,
-            "createdAt": self.created_at.isoformat(),
+            "createdAt": utc_iso(self.created_at),
         }
 
 

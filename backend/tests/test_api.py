@@ -165,20 +165,67 @@ class VerificationTests(ApiTestCase):
         self.assertTrue(any("Mathematics Standard" in d and "90" in d for d in consistency["details"]))
         self.assertGreaterEqual(result["riskScore"], 55)
 
-    def test_missing_required_fields_need_review(self):
-        text = "CENTRAL BOARD OF SECONDARY EDUCATION\nMARKS STATEMENT\nsome text without the usual fields here"
+    def test_missing_roll_number_is_rejected_with_high_risk(self):
+        text = GENUINE_MARKSHEET.replace("Roll No. 25147975\n", "")
         result = self.result(self.user, self.verify(self.user, text))
-        self.assertEqual(self.layer(result, "structure")["status"], "fail")
-        self.assertIn(result["verdict"], ("review", "suspicious"))
+        self.assertEqual(result["verdict"], "rejected")
+        self.assertGreaterEqual(result["riskScore"], 90)
+        self.assertIn("Roll number", result["rejectionReasons"][0])
+        self.assertEqual(self.layer(result, "structure")["missing"], ["Roll number"])
 
-    def test_unreadable_text_needs_review(self):
+    def test_unreadable_document_is_rejected(self):
         result = self.result(self.user, self.verify(self.user, "x"))
-        self.assertEqual(result["verdict"], "review")
+        self.assertEqual(result["verdict"], "rejected")
         self.assertEqual(self.layer(result, "ocr")["status"], "fail")
+
+    def test_unrelated_document_is_rejected(self):
+        invoice = ("TAX INVOICE\nBill to ACME Traders\nInvoice number 4471\nQuantity Unit price Amount\n"
+                   "GST 18%\nSubtotal 2,400\nGrand total 2,832\nPayment due in 30 days")
+        result = self.result(self.user, self.verify(self.user, invoice))
+        self.assertEqual(result["verdict"], "rejected")
+
+    def test_tenth_marksheet_uploaded_as_twelfth_is_suspicious(self):
+        result = self.result(self.user, self.verify(self.user, GENUINE_MARKSHEET, document_type="marksheet12"))
+        classification = self.layer(result, "classification")
+        self.assertEqual(classification["status"], "fail")
+        self.assertIn("Wrong document type", classification["details"][0])
+        self.assertEqual(result["verdict"], "suspicious")
+        self.assertGreaterEqual(result["riskScore"], 70)
+
+    def test_twelfth_marksheet_uploaded_as_tenth_is_suspicious(self):
+        # A 12th marksheet has no date of birth; that must not turn wrong-type into Rejected.
+        twelfth = (GENUINE_MARKSHEET.replace("SECONDARY SCHOOL EXAMINATION", "SENIOR SCHOOL CERTIFICATE EXAMINATION")
+                   .replace("Date of Birth 08-05-2004 8TH MAY TWO THOUSAND FOUR\n", ""))
+        result = self.result(self.user, self.verify(self.user, twelfth))
+        self.assertEqual(result["verdict"], "suspicious")
+        self.assertEqual(result["rejectionReasons"], [])
 
     def test_wrong_document_type_is_flagged(self):
         result = self.result(self.user, self.verify(self.user, GENUINE_MARKSHEET, document_type="domicile"))
         self.assertEqual(self.layer(result, "classification")["status"], "fail")
+        self.assertIn(result["verdict"], ("suspicious", "rejected"))
+
+    def test_reused_roll_number_with_changed_marks_is_suspicious(self):
+        first = self.result(self.user, self.verify(self.user, GENUINE_MARKSHEET))
+        self.assertEqual(first["verdict"], "verified")
+        # Internally consistent, so only the earlier verification reveals the change.
+        altered = GENUINE_MARKSHEET.replace("080 020 100 ONE HUNDRED", "070 020 090 NINETY")
+        second = self.result(self.user, self.verify(self.user, altered))
+        history = self.layer(second, "history")
+        self.assertEqual(history["status"], "fail")
+        self.assertTrue(any("document shows 90" in d for d in history["details"]))
+        self.assertEqual(second["verdict"], "suspicious")
+
+    def test_same_document_verified_again_still_passes(self):
+        self.verify(self.user, GENUINE_MARKSHEET)
+        again = self.result(self.user, self.verify(self.user, GENUINE_MARKSHEET))
+        self.assertEqual(self.layer(again, "history")["status"], "pass")
+        self.assertEqual(again["verdict"], "verified")
+
+    def test_times_are_returned_with_utc_offset(self):
+        self.verify(self.user, GENUINE_MARKSHEET)
+        item = self.client.get("/documents/history", headers=self.headers(self.user)).json[0]
+        self.assertTrue(item["createdAt"].endswith("+00:00"), item["createdAt"])
 
     def test_matching_reference_passes(self):
         reference = self.reference_root / "marksheet10" / "ref-genuine.pdf"

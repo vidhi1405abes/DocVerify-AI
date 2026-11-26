@@ -48,6 +48,15 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(fields["rollNumber"], "25650028")
         self.assertEqual(fields["subjects"][0]["theory"], 67)
 
+    def test_finds_name_in_badly_read_certify_line(self):
+        # Real EasyOCR output from a CBSE Class XII marksheet.
+        text = ("SEMOR SC HOOL ERTIFICATE EXAMINATION, 2022\nTht /e t0 cstuily Lhal Vivek KUMAR\nTTT\n"
+                "Roll *o 25650028\nMuthci Name RAKHI DEVI\nFatber & Qunrdian $ Namc ARJUN KUMAR")
+        fields, _ = extract_fields("marksheet12", fake_ocr(text))
+        self.assertEqual(fields["name"], "VIVEK KUMAR")
+        self.assertEqual(fields["fatherName"], "ARJUN KUMAR")
+        self.assertEqual(fields["motherName"], "RAKHI DEVI")
+
     def test_extracts_aadhaar_fields(self):
         text = "Government of India\nVIDHI SHARMA\nDOB: 14/06/2001\nFEMALE\n2341 2341 2346"
         fields, _ = extract_fields("aadhaar", fake_ocr(text))
@@ -84,6 +93,10 @@ class ConsistencyTests(unittest.TestCase):
         findings = self.check(GENUINE_MARKSHEET.replace("075 020 095 NINETY FIVE", "010 010 020 TWENTY"))
         self.assertTrue(any("below the pass mark" in p["message"] for p in findings.problems))
 
+    def test_detects_fail_result_with_every_subject_passed(self):
+        findings = self.check(GENUINE_MARKSHEET.replace("Result PASS", "Result FAIL"))
+        self.assertTrue(any("Result says FAIL" in p["message"] for p in findings.problems))
+
     def test_invalid_aadhaar_checksum(self):
         findings = self.check("Government of India\nNAME\nDOB: 14/06/2001\nMALE\n2341 2341 2345", "aadhaar")
         self.assertTrue(any("Verhoeff" in p["message"] for p in findings.problems))
@@ -96,6 +109,20 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(classify.classify(aadhaar)[0], "aadhaar")
         invoice = "INVOICE bill to quantity unit price GST subtotal amount due"
         self.assertEqual(classify.classify(invoice)[0], "other")
+
+
+class ClassEvidenceTests(unittest.TestCase):
+    def test_tells_tenth_and_twelfth_apart(self):
+        self.assertEqual(classify.class_evidence("ALL INDIA SECONDARY SCHOOL EXAMINATION, 2019")[0], "marksheet10")
+        self.assertEqual(classify.class_evidence("SENIOR SCHOOL CERTIFICATE EXAMINATION")[0], "marksheet12")
+        self.assertEqual(classify.class_evidence("SEMOR SC HOOL ERTIFICATE EXAMINATION")[0], "marksheet12")
+        self.assertEqual(classify.class_evidence("Senior Secondary School Examination")[0], "marksheet12")
+        self.assertEqual(classify.class_evidence("Marksheet Class XII")[0], "marksheet12")
+        self.assertIsNone(classify.class_evidence("Progress report Class XI"))
+
+    def test_uses_subjects_when_wording_is_missing(self):
+        self.assertEqual(classify.class_evidence("", [{"subject": "PHYSICS"}])[0], "marksheet12")
+        self.assertEqual(classify.class_evidence("", [{"subject": "SOCIAL SCIENCE"}])[0], "marksheet10")
 
 
 class QrTests(unittest.TestCase):

@@ -19,6 +19,7 @@ WEIGHTS = {
     "qr": 10,
     "records": 20,
     "reference": 15,
+    "history": 10,
 }
 STATUS_RISK = {"pass": 0.0, "warn": 0.5, "fail": 1.0}
 SUSPICIOUS_AT = 55
@@ -26,13 +27,19 @@ REVIEW_AT = 25
 MIN_COVERAGE = 0.4
 MATCH_THRESHOLD = 0.9
 MIN_TEXT_LENGTH = 30
+SUSPICIOUS_MIN_RISK = 70
+REJECTED_MIN_RISK = 90
+WRONG_TYPE_CONFIDENCE = 0.6
+NOT_A_DOCUMENT_CONFIDENCE = 0.5
 
 VERDICTS = {
     "verified": ("Verified", "Most verification checks passed and no signs of manipulation were found."),
     "review": ("Requires Review", "The system could not confidently verify this document. A person should "
                                   "inspect it."),
-    "suspicious": ("Suspicious", "Several checks point to manipulation, inconsistent data or a record "
-                                 "mismatch."),
+    "suspicious": ("Suspicious", "Checks point to manipulation, inconsistent data, the wrong document type or "
+                                 "a record mismatch."),
+    "rejected": ("Rejected", "The document cannot be accepted: mandatory information is missing, it could not "
+                             "be read, or it is not a supported document."),
 }
 
 _ocr_lock = threading.Lock()
@@ -96,7 +103,8 @@ def cached_reference_texts(reference_root):
 def ocr_layer(result):
     if result.word_count < 5 or len(normalized_text(result.text)) < MIN_TEXT_LENGTH:
         return _layer("ocr", "Text extraction (OCR)", "fail",
-                      ["Too little text could be read. Upload a clearer, straight-on scan or photo."])
+                      ["Too little text could be read. Upload a clearer, straight-on scan or photo."],
+                      extra={"rejection": "The document is blank or unreadable."})
     confidence = round(result.mean_confidence * 100)
     details = [f"Read {result.word_count} text regions with {confidence}% average OCR confidence."]
     if result.mean_confidence < 0.35:
@@ -105,25 +113,50 @@ def ocr_layer(result):
     return _layer("ocr", "Text extraction (OCR)", "pass", details)
 
 
-def classification_layer(selected, text, reference_texts):
+def classification_layer(selected, text, reference_texts, fields):
+    """Is this the type of document the user said it is?
+
+    Explicit wording ("Senior School Certificate Examination") or subjects decide 10th versus
+    12th; otherwise the scikit-learn model decides. A different type is a critical failure.
+    """
     predicted, probability, ranked = classify.classify(text, reference_texts)
     selected_probability = dict(ranked).get(selected, 0.0)
     names = {k: v["name"] for k, v in DOCUMENT_TYPES.items()} | {"other": "an unrelated document"}
     extra = {"detectedType": predicted, "detectedTypeName": names[predicted],
              "probability": round(probability, 3),
              "ranking": [{"type": t, "name": names[t], "probability": p} for t, p in ranked]}
+    name = "Document classification"
+
+    evidence = classify.class_evidence(text, fields.get("subjects", [])) \
+        if selected.startswith("marksheet") or predicted.startswith("marksheet") else None
+    if evidence:
+        evidence_type, reason = evidence
+        extra.update(detectedType=evidence_type, detectedTypeName=names[evidence_type])
+        if evidence_type == selected:
+            return _layer("classification", name, "pass",
+                          [f"This is a {names[selected]}: {reason}."], extra=extra)
+        if selected.startswith("marksheet"):
+            return _layer("classification", name, "fail",
+                          [f"Wrong document type: you selected {names[selected]}, but this is a "
+                           f"{names[evidence_type]} ({reason})."], critical=True, extra=extra)
+
     if predicted == selected:
-        return _layer("classification", "Document classification", "pass",
+        return _layer("classification", name, "pass",
                       [f"Content matches a {names[selected]} ({round(probability * 100)}% confidence)."],
                       extra=extra)
-    if selected_probability >= 0.2:
-        return _layer("classification", "Document classification", "warn",
-                      [f"Content looks most like {names[predicted]} ({round(probability * 100)}%), "
-                       f"{names[selected]} is less likely ({round(selected_probability * 100)}%)."],
-                      extra=extra)
-    return _layer("classification", "Document classification", "fail",
-                  [f"You selected {names[selected]}, but the content looks like {names[predicted]} "
-                   f"({round(probability * 100)}% confidence)."], extra=extra)
+    if predicted == classify.OTHER and probability >= NOT_A_DOCUMENT_CONFIDENCE:
+        extra["rejection"] = "It does not look like any supported document."
+        return _layer("classification", name, "fail",
+                      [f"This does not look like a {names[selected]} or any other supported document "
+                       f"({round(probability * 100)}% confidence)."], extra=extra)
+    if probability >= WRONG_TYPE_CONFIDENCE or selected_probability < 0.2:
+        return _layer("classification", name, "fail",
+                      [f"Wrong document type: you selected {names[selected]}, but the content looks like "
+                       f"{names[predicted]} ({round(probability * 100)}% confidence)."],
+                      critical=True, extra=extra)
+    return _layer("classification", name, "warn",
+                  [f"Content looks most like {names[predicted]} ({round(probability * 100)}%), "
+                   f"{names[selected]} is less likely ({round(selected_probability * 100)}%)."], extra=extra)
 
 
 def structure_layer(document_type, fields):
@@ -133,10 +166,52 @@ def structure_layer(document_type, fields):
     details = [f"{FIELD_LABELS[f]}: present" for f in present] + [f"{FIELD_LABELS[f]}: missing" for f in missing]
     if document_type.startswith("marksheet") and fields.get("subjects"):
         details.append(f"{len(fields['subjects'])} subject rows found in the marks table.")
-    ratio = len(present) / len(required)
-    status = "pass" if not missing else "warn" if ratio >= 0.6 else "fail"
-    return _layer("structure", "Structure & required fields", status, details,
-                  extra={"present": len(present), "required": len(required)})
+    extra = {"present": len(present), "required": len(required), "missing": [FIELD_LABELS[f] for f in missing]}
+    if not missing:
+        return _layer("structure", "Structure & required fields", "pass", details, extra=extra)
+    missing_labels = ", ".join(FIELD_LABELS[f] for f in missing)
+    extra["rejection"] = f"Mandatory field(s) missing: {missing_labels}."
+    details.insert(0, f"Mandatory field(s) missing: {missing_labels}. If they are printed on the document, "
+                      "upload a clearer scan.")
+    return _layer("structure", "Structure & required fields", "fail", details, extra=extra)
+
+
+def _stored_values(result):
+    """Field values and subject totals saved with an earlier verification."""
+    values = {f["key"]: f["value"] for f in result.get("fields", []) if f["key"] in COMPARED_FIELDS}
+    subjects = {r["subject"]: r["total"] for r in result.get("subjects", []) if r.get("total") is not None}
+    if subjects:
+        values["subjects"] = subjects
+    return values
+
+
+def history_layer(document_type, fields, previous):
+    """Has this roll / certificate number been verified before with different details?
+
+    A forged copy usually reuses a genuine ID with a different name or changed marks.
+    """
+    keys = [k for k in DOCUMENT_TYPES[document_type]["identifiers"] if fields.get(k)]
+    if not keys:
+        return _layer("history", "Previous verifications", "skipped",
+                      ["No roll or certificate number to compare with earlier verifications."])
+    matches = []
+    for earlier in previous or []:
+        values = _stored_values(earlier)
+        if any(normalized_text(str(values.get(k, ""))) == normalized_text(str(fields[k])) for k in keys):
+            matches.append((earlier, values))
+    if not matches:
+        return _layer("history", "Previous verifications", "skipped",
+                      ["This ID has not been verified before."])
+
+    for earlier, values in matches:
+        problems, passed = _compare_fields(values, fields, "earlier verification")
+        if problems:
+            when = earlier.get("createdAt", "")[:10]
+            identifier = fields[keys[0]]
+            details = [f"{FIELD_LABELS[keys[0]]} {identifier} was verified on {when} with different details."]
+            return _layer("history", "Previous verifications", "fail", details + problems, critical=True)
+    return _layer("history", "Previous verifications", "pass",
+                  [f"Matches {len(matches)} earlier verified document(s) with the same ID."])
 
 
 def consistency_layer(document_type, fields):
@@ -304,22 +379,26 @@ def score(layers):
         if used_weight else 100
     coverage = used_weight / total_weight
     by_key = {l["key"]: l for l in layers}
+    # With the wrong type selected, that type's missing fields are a symptom, not the finding.
+    wrong_type = by_key["classification"]["critical"] and by_key["classification"]["status"] == "fail"
+    rejections = [l["rejection"] for l in layers
+                  if l.get("rejection") and not (wrong_type and l["key"] == "structure")]
 
-    if by_key["ocr"]["status"] == "fail":
-        verdict = "review"
+    if rejections:
+        verdict, risk = "rejected", max(risk, REJECTED_MIN_RISK)
     elif any(l["critical"] and l["status"] == "fail" for l in layers):
-        verdict = "suspicious"
-        risk = max(risk, 70)
+        verdict, risk = "suspicious", max(risk, SUSPICIOUS_MIN_RISK)
     elif risk >= SUSPICIOUS_AT:
         verdict = "suspicious"
-    elif risk >= REVIEW_AT or coverage < MIN_COVERAGE or by_key["structure"]["status"] == "fail":
+    elif risk >= REVIEW_AT or coverage < MIN_COVERAGE:
         verdict = "review"
     else:
         verdict = "verified"
-    return verdict, risk, round(coverage, 2)
+    return verdict, risk, round(coverage, 2), rejections
 
 
-def run(document_type, file_bytes, extension, filename, reference_root, records):
+def run(document_type, file_bytes, extension, filename, reference_root, records, previous=None):
+    """Verify one document. `previous` holds earlier verified results of the same type."""
     result, colour_pages, steps, metadata = read_document(file_bytes, extension)
     fields, field_confidence = extract.extract_fields(document_type, result)
 
@@ -327,13 +406,14 @@ def run(document_type, file_bytes, extension, filename, reference_root, records)
     if layers[0]["status"] != "fail":
         reference_texts = cached_reference_texts(reference_root)
         layers += [
-            classification_layer(document_type, result.text, reference_texts),
+            classification_layer(document_type, result.text, reference_texts, fields),
             structure_layer(document_type, fields),
             consistency_layer(document_type, fields),
             tampering_layer(colour_pages, result, file_bytes, extension, metadata),
             qr_layer(colour_pages, fields, document_type),
             records_layer(document_type, fields, records),
             reference_layer(document_type, result, fields, reference_root),
+            history_layer(document_type, fields, previous),
         ]
     else:
         layers += [_layer(key, name, "skipped", ["Skipped because the text could not be read."])
@@ -343,9 +423,10 @@ def run(document_type, file_bytes, extension, filename, reference_root, records)
                                      ("tampering", "Tampering analysis"),
                                      ("qr", "QR code / document ID"),
                                      ("records", "Authorized record check"),
-                                     ("reference", "Reference document comparison"))]
+                                     ("reference", "Reference document comparison"),
+                                     ("history", "Previous verifications"))]
 
-    verdict, risk, coverage = score(layers)
+    verdict, risk, coverage, rejections = score(layers)
     label, message = VERDICTS[verdict]
     reasons = [
         {"status": layer["status"], "text": layer["details"][0], "layer": layer["name"]}
@@ -365,6 +446,7 @@ def run(document_type, file_bytes, extension, filename, reference_root, records)
         "message": message,
         "riskScore": risk,
         "coverage": coverage,
+        "rejectionReasons": rejections,
         "reasons": reasons,
         "layers": layers,
         "fields": [

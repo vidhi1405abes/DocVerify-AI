@@ -6,7 +6,9 @@ references are added. Character n-grams keep it robust to OCR spelling mistakes.
 """
 
 import random
+import re
 import threading
+from difflib import SequenceMatcher
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
@@ -69,6 +71,66 @@ def _get_model(reference_texts):
             model.fit(texts, labels)
             _model, _trained_on = model, key
         return _model
+
+
+# Phrases and subjects that settle 10th versus 12th, which share almost all their wording.
+# Phrases are matched on letters only, so OCR spacing and punctuation do not matter.
+CLASS_PHRASES = {
+    "marksheet12": ["seniorschoolcertificateexamination", "seniorsecondary", "highersecondary",
+                    "intermediateexamination"],
+    "marksheet10": ["secondaryschoolexamination", "highschoolexamination", "matriculation"],
+}
+# Short markers are matched as whole words: "Class X" must not match "Class XI" or "Class XII".
+CLASS_MARKERS = {
+    "marksheet12": (r"\bclass\s*(?:xii|12(?:th)?)\b|\baissce\b", "Class XII"),
+    "marksheet10": (r"\bclass\s*(?:x|10(?:th)?)\b|\baisse\b", "Class X"),
+}
+CLASS_SUBJECTS = {
+    "marksheet12": ["PHYSICS", "CHEMISTRY", "BIOLOGY", "ACCOUNTANCY", "BUSINESS STUDIES", "ECONOMICS",
+                    "ENGLISH CORE", "POLITICAL SCIENCE", "PHYSICAL EDUCATION"],
+    "marksheet10": ["SOCIAL SCIENCE", "SCIENCE", "SCIENCE & TECH", "HINDI COURSE-A", "HINDI COURSE-B"],
+}
+
+
+def _fuzzy_contains(haystack, phrase, threshold=0.85):
+    if phrase in haystack:
+        return True
+    size = len(phrase)
+    for start in range(0, max(len(haystack) - size + 1, 1), 2):
+        window = haystack[start:start + size]
+        matcher = SequenceMatcher(None, window, phrase, autojunk=False)
+        if matcher.real_quick_ratio() >= threshold and matcher.ratio() >= threshold:
+            return True
+    return False
+
+
+def class_evidence(text, subjects=()):
+    """Decide 10th vs 12th from printed wording and subjects. Returns (type, reason) or None."""
+    letters = re.sub(r"[^a-z]", "", text.lower())
+    # 12th is checked first: "Senior Secondary School Examination" contains the 10th phrase.
+    for type_id in ("marksheet12", "marksheet10"):
+        pattern, label = CLASS_MARKERS[type_id]
+        if re.search(pattern, text, re.IGNORECASE):
+            return type_id, f"the document says \"{label}\""
+        for phrase in CLASS_PHRASES[type_id]:
+            if _fuzzy_contains(letters, phrase):
+                return type_id, f"the document says \"{phrase_label(phrase)}\""
+    names = {row["subject"].upper() for row in subjects}
+    for type_id in ("marksheet12", "marksheet10"):
+        found = sorted(s for s in CLASS_SUBJECTS[type_id] if s in names)
+        if found:
+            return type_id, f"it lists {', '.join(s.title() for s in found[:3])}"
+    return None
+
+
+def phrase_label(phrase):
+    return {
+        "seniorschoolcertificateexamination": "Senior School Certificate Examination",
+        "seniorsecondary": "Senior Secondary", "highersecondary": "Higher Secondary",
+        "intermediateexamination": "Intermediate Examination",
+        "secondaryschoolexamination": "Secondary School Examination",
+        "highschoolexamination": "High School Examination", "matriculation": "Matriculation",
+    }[phrase]
 
 
 def classify(text, reference_texts=None):

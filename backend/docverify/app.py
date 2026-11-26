@@ -16,7 +16,7 @@ from .auth import admin_required, bp as auth_bp, json_error, login_required
 from .config import (ALLOWED_ORIGINS, BACKEND_DIR, MAX_UPLOAD_BYTES, SUPPORTED_EXTENSIONS,
                      default_database_url, secret_key)
 from .doc_types import DOCUMENT_TYPES, public_types
-from .models import AuthorizedRecord, Verification, make_session_factory
+from .models import AuthorizedRecord, Verification, make_session_factory, utc_iso
 
 HISTORY_LIMIT = 200
 
@@ -50,6 +50,18 @@ def _records_for(document_type):
         return session.scalars(
             select(AuthorizedRecord).where(AuthorizedRecord.document_type == document_type)
         ).all()
+
+
+def _verified_results(document_type, limit=1000):
+    """Earlier results of this type that passed, to catch reused IDs with changed details."""
+    with current_app.config["DB"]() as session:
+        rows = session.scalars(
+            select(Verification)
+            .where(Verification.document_type == document_type, Verification.verdict == "verified")
+            .order_by(Verification.created_at.desc())
+            .limit(limit)
+        ).all()
+    return [json.loads(row.result_json) for row in rows]
 
 
 def create_app(reference_root=None, database_url=None):
@@ -130,7 +142,8 @@ def create_app(reference_root=None, database_url=None):
             return error
         file_bytes, extension, filename = upload
         result = engine.run(document_type, file_bytes, extension, filename,
-                            app.config["REFERENCE_ROOT"], _records_for(document_type))
+                            app.config["REFERENCE_ROOT"], _records_for(document_type),
+                            _verified_results(document_type))
 
         with app.config["DB"]() as session:
             verification = Verification(
@@ -140,7 +153,7 @@ def create_app(reference_root=None, database_url=None):
             session.add(verification)
             session.flush()
             result["id"] = verification.id
-            result["createdAt"] = verification.created_at.isoformat()
+            result["createdAt"] = utc_iso(verification.created_at)
             verification.result_json = json.dumps(result)
             session.commit()
         return jsonify({"id": result["id"], "verdict": result["verdict"]}), 201
