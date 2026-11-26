@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, ChevronDown, Download, MinusCircle, Printer, XCircle } from 'lucide-react'
+import { AlertTriangle, Camera, CheckCircle2, ChevronDown, Download, MinusCircle, Printer, XCircle } from 'lucide-react'
 import Spinner from '@/components/ui/Spinner'
 import Message from '@/components/ui/Message'
 import VerdictBadge from '@/components/documents/VerdictBadge'
@@ -226,6 +226,22 @@ const Results = () => {
           ))}
         </ul>
       </Card>
+
+      {result.photoTips?.length > 0 && (
+        <section className="rounded-lg border border-amber-200 bg-amber-50 p-5 text-amber-900 print:hidden">
+          <h2 className="flex items-center gap-2 text-lg font-semibold">
+            <Camera className="h-5 w-5" /> Get a clearer result
+          </h2>
+          <p className="mt-1 text-sm">
+            The image was cleaned up automatically, but some text was still hard to read. Upload it again after:
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+            {result.photoTips.map((tip) => (
+              <li key={tip}>{tip}</li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <Card title="Verification layers">
         <ul>

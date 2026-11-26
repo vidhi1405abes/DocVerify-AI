@@ -197,6 +197,27 @@ def _name_above_roll_number(lines):
     return None, None
 
 
+AADHAAR_HEADER_WORDS = ["government", "india", "unique", "identification", "authority", "aadhaar"]
+
+
+def _aadhaar_name(lines, birth_line):
+    """On an Aadhaar card the holder's name is printed just above the date of birth."""
+    if birth_line is None:
+        dob_label = re.compile(LABELS["dateOfBirth"], re.IGNORECASE)
+        birth_line = next((line for line in lines if dob_label.search(line.text)), None)
+    if birth_line is None:
+        return None, None
+    index = lines.index(birth_line)
+    for above in reversed(lines[max(0, index - 2):index]):
+        words = [w for w in re.findall(r"[A-Za-z][A-Za-z.']+", above.text)]
+        if any(get_close_matches(w.casefold(), AADHAAR_HEADER_WORDS, n=1, cutoff=0.7) for w in words):
+            continue
+        capitalised = [w for w in words if w[0].isupper()]
+        if 2 <= len(capitalised) <= 4 and len(capitalised) == len(words):
+            return _name(" ".join(capitalised)), above
+    return None, None
+
+
 def _first(pattern, text, group=1, flags=re.IGNORECASE):
     match = re.search(pattern, text, flags)
     return match.group(group) if match else None
@@ -285,6 +306,9 @@ def extract_fields(document_type, ocr):
         fields["subjects"] = rows
 
     gender = _first(r"\b(male|female|transgender)\b", text)
+    if not gender and document_type == "aadhaar":
+        # OCR often glues a stray letter on, e.g. "MMALE"; check "female" before "male".
+        gender = _first(r"(female|male|transgender)", text)
     put("gender", gender.upper() if gender else None)
 
     full_aadhaar = re.search(r"\b([2-9]\d{3})\s?(\d{4})\s?(\d{4})\b", text)
@@ -294,9 +318,20 @@ def extract_fields(document_type, ocr):
             put("aadhaarNumber", "".join(full_aadhaar.groups()))
         elif masked:
             put("aadhaarNumber", f"XXXXXXXX{masked.group(1)}")
+        # The DOB label is often printed in Hindi and unreadable; the date itself still is.
+        birth_line = None
+        if "dateOfBirth" not in fields:
+            for line in lines:
+                birth = parse_date(line.text)
+                if birth:
+                    put("dateOfBirth", birth.isoformat(), line)
+                    birth_line = line
+                    break
         if "dateOfBirth" not in fields:
             year = _first(r"(?:year of birth|yob)\W*(\d{4})", text)
             put("dateOfBirth", f"{year}" if year else None)
+        if "name" not in fields:
+            put("name", *_aadhaar_name(lines, birth_line))
 
     put("totalPercentile", _first(r"total\s*(?:nta\s*score|percentile)\W*(\d{1,3}\.\d+)", text)
         or _first(r"\bpercentile\b\W*(\d{1,3}\.\d+)", text))

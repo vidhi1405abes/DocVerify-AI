@@ -123,6 +123,32 @@ def class_evidence(text, subjects=()):
     return None
 
 
+AADHAAR_PHRASES = ["governmentofindia", "uniqueidentificationauthority", "aadhaar", "aadhar"]
+
+
+def aadhaar_evidence(text):
+    """Aadhaar cards carry a 4-4-4 digit number, 'Government of India', a birth date and a gender.
+
+    Returns a reason when at least two of these are present, even in badly read text."""
+    letters = re.sub(r"[^a-z]", "", text.lower())
+    markers = []
+    if re.search(r"\b(?:\d{4}|[xX*]{4})\s\d{4}\s\d{4}\b|\b[xX*]{4}\s[xX*]{4}\s\d{4}\b", text):
+        markers.append("a 12-digit Aadhaar-style number")
+    if any(_fuzzy_contains(letters, phrase, 0.8) for phrase in AADHAAR_PHRASES):
+        markers.append("Government of India / Aadhaar wording")
+    if re.search(r"\d{2}[/-]\d{2}[/-]\d{4}", text) and re.search(r"(female|male)", text, re.IGNORECASE):
+        markers.append("a birth date and gender")
+    return f"it shows {' and '.join(markers)}" if len(markers) >= 2 else None
+
+
+def type_evidence(text, subjects=()):
+    """Printed evidence of the document type: (type, reason) or None."""
+    reason = aadhaar_evidence(text)
+    if reason:
+        return "aadhaar", reason
+    return class_evidence(text, subjects)
+
+
 def phrase_label(phrase):
     return {
         "seniorschoolcertificateexamination": "Senior School Certificate Examination",

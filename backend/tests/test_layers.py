@@ -57,6 +57,15 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(fields["fatherName"], "ARJUN KUMAR")
         self.assertEqual(fields["motherName"], "RAKHI DEVI")
 
+    def test_reads_aadhaar_photo_with_garbled_labels(self):
+        # Shape of real EasyOCR output from a phone photo: Hindi labels unreadable, "MMALE".
+        text = "HdAtn\nGovaanmant &ndia\nTR 'an\nRavi Verma\n14 fafa 27/07/1979\nT\" MMALE\n2341 2341 2346"
+        fields, _ = extract_fields("aadhaar", fake_ocr(text))
+        self.assertEqual(fields["name"], "RAVI VERMA")
+        self.assertEqual(fields["dateOfBirth"], "1979-07-27")
+        self.assertEqual(fields["gender"], "MALE")
+        self.assertEqual(classify.type_evidence(text)[0], "aadhaar")
+
     def test_extracts_aadhaar_fields(self):
         text = "Government of India\nVIDHI SHARMA\nDOB: 14/06/2001\nFEMALE\n2341 2341 2346"
         fields, _ = extract_fields("aadhaar", fake_ocr(text))

@@ -56,14 +56,27 @@ def _layer(key, name, status, details, critical=False, extra=None):
 def read_document(file_bytes, extension):
     """Load, preprocess and OCR a document. Returns (ocr result, colour pages, steps, pdf metadata)."""
     pages, metadata = ocr.load_pages(file_bytes, extension)
-    grays, colours, steps = [], [], []
-    for page in pages:
+    result, colours, steps = ocr.OcrResult(), [], []
+    confidences = []
+    tips = ocr.photo_quality_tips(pages[0])
+    for index, page in enumerate(pages):
         gray, colour, page_steps = ocr.preprocess(page)
-        grays.append(gray)
+        with _ocr_lock:
+            page_result = ocr.read_text([gray], index)
+            # Blurry or shadowed photos get a second, stronger clean-up; keep whichever reads better.
+            if ocr.needs_enhancement(page_result):
+                enhanced_gray, enhanced_colour, enhanced_steps = ocr.enhance(gray, colour)
+                enhanced_result = ocr.read_text([enhanced_gray], index)
+                if ocr.reading_quality(enhanced_result) > ocr.reading_quality(page_result):
+                    page_result, colour = enhanced_result, enhanced_colour
+                    page_steps = page_steps + enhanced_steps
         colours.append(colour)
         steps.extend(step for step in page_steps if step not in steps)
-    with _ocr_lock:
-        result = ocr.read_text(grays)
+        result.lines.extend(page_result.lines)
+        confidences += [w.conf for line in page_result.lines for w in line.words]
+    result.word_count = len(confidences)
+    result.mean_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+    result.photo_tips = tips
     return result, colours, steps, metadata
 
 
@@ -127,28 +140,31 @@ def classification_layer(selected, text, reference_texts, fields):
              "ranking": [{"type": t, "name": names[t], "probability": p} for t, p in ranked]}
     name = "Document classification"
 
-    evidence = classify.class_evidence(text, fields.get("subjects", [])) \
-        if selected.startswith("marksheet") or predicted.startswith("marksheet") else None
+    evidence = classify.type_evidence(text, fields.get("subjects", []))
     if evidence:
         evidence_type, reason = evidence
         extra.update(detectedType=evidence_type, detectedTypeName=names[evidence_type])
         if evidence_type == selected:
             return _layer("classification", name, "pass",
                           [f"This is a {names[selected]}: {reason}."], extra=extra)
-        if selected.startswith("marksheet"):
-            return _layer("classification", name, "fail",
-                          [f"Wrong document type: you selected {names[selected]}, but this is a "
-                           f"{names[evidence_type]} ({reason})."], critical=True, extra=extra)
+        return _layer("classification", name, "fail",
+                      [f"Wrong document type: you selected {names[selected]}, but this is a "
+                       f"{names[evidence_type]} ({reason})."], critical=True, extra=extra)
 
     if predicted == selected:
         return _layer("classification", name, "pass",
                       [f"Content matches a {names[selected]} ({round(probability * 100)}% confidence)."],
                       extra=extra)
-    if predicted == classify.OTHER and probability >= NOT_A_DOCUMENT_CONFIDENCE:
-        extra["rejection"] = "It does not look like any supported document."
-        return _layer("classification", name, "fail",
-                      [f"This does not look like a {names[selected]} or any other supported document "
-                       f"({round(probability * 100)}% confidence)."], extra=extra)
+    if predicted == classify.OTHER:
+        if probability >= NOT_A_DOCUMENT_CONFIDENCE:
+            extra["rejection"] = "It does not look like any supported document."
+            return _layer("classification", name, "fail",
+                          [f"This does not look like a {names[selected]} or any other supported document "
+                           f"({round(probability * 100)}% confidence)."], extra=extra)
+        # Too little readable text to tell: that is uncertainty, not a different document type.
+        return _layer("classification", name, "warn",
+                      [f"Could not confirm this is a {names[selected]}: too little readable text. "
+                       "A clearer photo or scan will help."], extra=extra)
     if probability >= WRONG_TYPE_CONFIDENCE or selected_probability < 0.2:
         return _layer("classification", name, "fail",
                       [f"Wrong document type: you selected {names[selected]}, but the content looks like "
@@ -456,6 +472,8 @@ def run(document_type, file_bytes, extension, filename, reference_root, records,
         ],
         "subjects": [{k: v for k, v in row.items() if k != "tokens"} for row in subjects],
         "preprocessing": steps or ["Image was already clean: no corrections needed."],
+        # Advice on retaking the photo, shown only when the reading actually struggled.
+        "photoTips": result.photo_tips if (ocr.needs_enhancement(result) or rejections) else [],
         "ocrText": result.text[:6000],
         "disclaimer": "This is an automated assessment to support a human verifier. It is not proof of "
                       "official authenticity.",

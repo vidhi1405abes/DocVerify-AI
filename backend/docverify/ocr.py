@@ -63,6 +63,7 @@ class OcrResult:
     lines: list = field(default_factory=list)
     mean_confidence: float = 0.0
     word_count: int = 0
+    photo_tips: list = field(default_factory=list)
 
     @property
     def text(self):
@@ -182,6 +183,62 @@ def preprocess(image):
     return gray, image, steps
 
 
+MAX_ENHANCED_SIDE = 3200
+MIN_SHARPNESS = 60
+MIN_SIDE_PIXELS = 650
+
+
+def photo_quality_tips(image):
+    """Plain-language advice when an upload is blurry, dark, washed out or too small."""
+    tips = []
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    scale = 1000 / max(gray.shape)
+    sample = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    if cv2.Laplacian(sample, cv2.CV_64F).var() < MIN_SHARPNESS:
+        tips.append("The photo is blurry. Hold the phone steady, tap the document to focus, and avoid zooming in.")
+    brightness = float(sample.mean())
+    if brightness < 90:
+        tips.append("The photo is too dark. Take it in daylight or a well-lit room.")
+    elif brightness > 245:
+        tips.append("The photo is washed out. Avoid direct light or flash glare on the document.")
+    if min(image.shape[:2]) < MIN_SIDE_PIXELS:
+        tips.append("The image is small. Send the original photo or a scan at 300 dpi; messaging apps "
+                    "such as WhatsApp shrink photos (send it as a document instead).")
+    return tips
+
+
+def enhance(gray, colour):
+    """Stronger clean-up for blurry, shadowed or heavily compressed photos (e.g. WhatsApp images).
+
+    Upscales 2x, flattens uneven lighting and shadows by dividing out the paper background,
+    and sharpens character edges. Returns (gray, colour with the same geometry, steps).
+    """
+    steps = []
+    factor = min(2.0, MAX_ENHANCED_SIDE / max(gray.shape[:2]))
+    if factor > 1.05:
+        gray = cv2.resize(gray, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
+        colour = cv2.resize(colour, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
+        steps.append(f"Enhanced: upscaled {factor:.1f}x more")
+
+    background = cv2.medianBlur(cv2.dilate(gray, np.ones((7, 7), np.uint8)), 31)
+    gray = cv2.divide(gray, background, scale=255)
+    steps.append("Enhanced: removed shadows and uneven lighting")
+
+    blurred = cv2.GaussianBlur(gray, (0, 0), 1.5)
+    gray = cv2.addWeighted(gray, 1.7, blurred, -0.7, 0)
+    steps.append("Enhanced: sharpened blurry text")
+    return gray, colour, steps
+
+
+def reading_quality(result):
+    """How much confidently-read text an OCR pass produced (higher is better)."""
+    return sum(w.conf * len(w.text) for line in result.lines for w in line.words if w.conf >= 0.3)
+
+
+def needs_enhancement(result):
+    return result.mean_confidence < 0.5 or result.word_count < 30
+
+
 def _group_lines(words, page):
     if not words:
         return []
@@ -197,12 +254,12 @@ def _group_lines(words, page):
     return [Line(sorted(line, key=lambda w: w.x0), page) for line in lines]
 
 
-def read_text(images):
+def read_text(images, first_page=0):
     """OCR every page image and rebuild reading-order lines."""
     reader = get_reader()
     result = OcrResult()
     confidences = []
-    for page_index, image in enumerate(images):
+    for page_index, image in enumerate(images, start=first_page):
         words = []
         for box, text, conf in reader.readtext(image):
             text = text.strip()

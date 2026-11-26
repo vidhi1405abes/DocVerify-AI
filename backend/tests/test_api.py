@@ -200,6 +200,22 @@ class VerificationTests(ApiTestCase):
         self.assertEqual(result["verdict"], "suspicious")
         self.assertEqual(result["rejectionReasons"], [])
 
+    def test_fake_aadhaar_with_invalid_number_is_suspicious_not_wrong_type(self):
+        text = "Govaanmant &ndia\nRavi Verma\n14 fafa 27/07/1979\nT\" MMALE\n2341 2341 2345\nTTT aerT Itt"
+        result = self.result(self.user, self.verify(self.user, text, document_type="aadhaar"))
+        self.assertEqual(self.layer(result, "classification")["status"], "pass")
+        self.assertEqual(self.layer(result, "structure")["status"], "pass")
+        self.assertTrue(any("Verhoeff" in d for d in self.layer(result, "consistency")["details"]))
+        self.assertEqual(result["verdict"], "suspicious")
+
+    def test_unclear_type_is_a_warning_not_wrong_type(self):
+        text = "Roll No 25147975\nName VAIBHAV KUMAR\nsome faint unreadable words here"
+        with patch("docverify.classify.classify", return_value=("other", 0.4, [("other", 0.4)])):
+            result = self.result(self.user, self.verify(self.user, text))
+        classification = self.layer(result, "classification")
+        self.assertEqual(classification["status"], "warn")
+        self.assertNotIn("Wrong document type", classification["details"][0])
+
     def test_wrong_document_type_is_flagged(self):
         result = self.result(self.user, self.verify(self.user, GENUINE_MARKSHEET, document_type="domicile"))
         self.assertEqual(self.layer(result, "classification")["status"], "fail")

@@ -164,6 +164,11 @@ const Verify = () => {
               </div>
               <p className="mt-2 text-sm text-blue-800">{selected.description}</p>
               <p className="mt-1 text-sm text-blue-700">Accepted formats: {formatsLabel(selected)} · up to 15 MB</p>
+              <p className="mt-2 text-sm text-blue-800">
+                <span className="font-medium">For the best result:</span> photograph the whole document flat, in good
+                light, without glare or shadows, and upload the original photo or a scan. Photos forwarded on
+                WhatsApp are shrunk and blurred; send them as a document instead.
+              </p>
               <p className="mt-1 text-sm text-blue-700">Must contain: {selected.requiredFields.join(', ')}</p>
             </div>
           )}
