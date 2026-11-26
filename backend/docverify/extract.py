@@ -1,7 +1,7 @@
 """Turn OCR lines into structured fields (names, IDs, dates, marks) with pattern rules."""
 
 import re
-from difflib import get_close_matches
+from difflib import SequenceMatcher, get_close_matches
 
 from .textutils import parse_date, to_digits, words_to_number
 
@@ -14,6 +14,7 @@ NUMBER_WORDS = [
 GRADE = re.compile(r"^(?:[A-E][1-2I l]?|AI|AL|BI|CI|DI|EI)$", re.IGNORECASE)
 MARK = re.compile(r"^(?:[0-9OoIlDBSZ]{2,3}|X{2,3}|AB)$", re.IGNORECASE)
 NAME_NOISE = re.compile(r"[^A-Za-z .']")
+CERTIFY_PHRASE = "thisistocertifythat"
 
 # Label patterns tolerate common OCR slips (0/o, l/I, missing letters).
 LABELS = {
@@ -23,7 +24,7 @@ LABELS = {
     "admissionNumber": r"admi\w*\s*(?:n[o0]\.?|number)",
     "certificateNumber": r"cert\w*\s*(?:n[o0]\.?|number)",
     "motherName": r"m[o0u]\w{2,4}\W{0,3}s?\s*n\w{2,3}e?",
-    "fatherName": r"f[a-z]{2,4}er\W{0,3}s?.{0,22}?n\w{1,3}e",
+    "fatherName": r"f[a-z]{2,4}er\W{0,3}s?.{0,22}?\bn[a-z]{2}[a-z]\b",
     "dateOfBirth": r"(?:d\w{2,3}\s*[o0]f\s*b\w{3,4}|\bd\.?\s*o\.?\s*b\.?|birth\s*date)",
     "school": r"\bsch\w{2,3}l\b(?!\W*(?:exam|cert|leav))(?:\s*name)?",
     "admissionDate": r"date\s*of\s*admi\w*",
@@ -154,13 +155,46 @@ def subject_rows(lines):
 def _name_after_certify(line):
     """'This is to certify that NAME', tolerating OCR spellings like 'cetly thal'."""
     words = line.text.split()
+    start = None
     for index in range(len(words) - 2):
         if (get_close_matches(words[index].casefold(), ["certify", "certified"], n=1, cutoff=0.6)
                 and get_close_matches(words[index + 1].casefold(), ["that"], n=1, cutoff=0.5)):
-            rest = " ".join(words[index + 2:])
-            rest = re.sub(r"^(?:shri|smt|kumari|mr|ms|miss)\.?\s+", "", rest, flags=re.I)
-            return _name(re.split(r"\b(?:s/o|d/o|son|daughter|w/o)\b", rest, flags=re.I)[0])
-    return None
+            start = index + 2
+            break
+    if start is None:
+        # Badly read openings such as "Tht /e t0 cstuily Lhal": compare the whole phrase.
+        best = 0.0
+        for count in range(3, min(len(words) - 1, 8)):
+            letters = re.sub(r"[^a-z]", "", " ".join(words[:count]).casefold())
+            score = SequenceMatcher(None, letters, CERTIFY_PHRASE).ratio()
+            if score > best:
+                best, start = score, count
+        if best < 0.6:
+            return None
+    rest = " ".join(words[start:])
+    rest = re.sub(r"^(?:shri|smt|kumari|mr|ms|miss)\.?\s+", "", rest, flags=re.I)
+    return _name(re.split(r"\b(?:s/o|d/o|son|daughter|w/o)\b", rest, flags=re.I)[0])
+
+
+def _name_above_roll_number(lines):
+    """On board marksheets the candidate's name is printed on the line above the roll number."""
+    roll = re.compile(LABELS["rollNumber"], re.IGNORECASE)
+    for index, line in enumerate(lines[1:], start=1):
+        if roll.search(line.text):
+            for above in reversed(lines[max(0, index - 2):index]):
+                # The name is the run of capitalised words at the end of the line.
+                tail = []
+                for word in reversed(above.text.split()):
+                    if not re.fullmatch(r"[A-Z][A-Za-z.']+", word):
+                        break
+                    tail.insert(0, word)
+                # Drop a misread "that" / "certify" left in front of the name.
+                while tail and get_close_matches(tail[0].casefold(), ["that", "certify"], n=1, cutoff=0.5):
+                    tail.pop(0)
+                if 2 <= len(tail) <= 4:
+                    return _name(" ".join(tail)), above
+            return None, None
+    return None, None
 
 
 def _first(pattern, text, group=1, flags=re.IGNORECASE):
@@ -189,6 +223,9 @@ def extract_fields(document_type, ocr):
     if "name" not in fields:
         value, line = find_labelled(lines, "candidateName")
         put("name", _name(value), line)
+    if "name" not in fields:
+        value, line = _name_above_roll_number(lines)
+        put("name", value, line)
     if "name" not in fields:
         for line in lines:
             match = re.match(r"^\s*name\s*[:\-]?\s*(.+)", line.text, re.I)
