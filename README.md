@@ -3,7 +3,7 @@
 Intelligent document verification and fraud detection. DocVerify AI reads an uploaded
 document, extracts its information, checks that it is complete and consistent, looks for
 signs of editing, verifies QR codes and authorized records, and explains its verdict:
-**Verified**, **Requires Review** or **Suspicious**, with a 0–100 risk score.
+**Verified**, **Requires Review**, **Suspicious** or **Rejected**, with a 0–100 risk score.
 
 Results support a human verifier; they are not proof of official authenticity.
 
@@ -25,6 +25,11 @@ The full specification is in [requirements.pdf](requirements.pdf).
 | QR / document ID | Decodes QR codes (including Aadhaar secure QR) and compares them with the printed details |
 | Authorized records | Compares the document field by field with records from an authorized source |
 | Reference documents | Compares with genuine references of the same record |
+| Previous verifications | Flags a roll or certificate number verified before with a different name or marks |
+
+**Verdicts:** *Rejected* (risk 90+) when a mandatory field is missing, the file is unreadable or it is not a
+supported document; *Suspicious* (risk 70+) for the wrong document type, inconsistent marks or a record
+mismatch; *Requires Review* for risk 25–54; *Verified* below 25. Times are shown in IST.
 
 Supported types: 10th and 12th marksheets, JEE result, transfer certificate, domicile
 certificate and Aadhaar card.

@@ -14,12 +14,18 @@ export const VERDICT_STYLES = {
     panel: 'bg-red-50 border-red-200 text-red-900',
     bar: 'bg-red-500',
   },
+  rejected: {
+    badge: 'bg-gray-900 text-white ring-gray-900/20',
+    panel: 'bg-gray-100 border-gray-400 text-gray-900',
+    bar: 'bg-gray-900',
+  },
 }
 
 export const VERDICT_LABELS = {
   verified: 'Verified',
   review: 'Requires Review',
   suspicious: 'Suspicious',
+  rejected: 'Rejected',
 }
 
 export const STATUS_STYLES = {
@@ -29,5 +35,10 @@ export const STATUS_STYLES = {
   skipped: { label: 'Not run', className: 'bg-gray-100 text-gray-600' },
 }
 
+// The server sends UTC times; always show them in Indian Standard Time.
 export const formatDateTime = (value) =>
-  new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  `${new Date(value).toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })} IST`

@@ -40,6 +40,7 @@ const RiskMeter = ({ score, verdict }) => (
       <span>0 · Verified</span>
       <span>25 · Review</span>
       <span>55 · Suspicious</span>
+      <span>90 · Rejected</span>
     </div>
   </div>
 )
@@ -192,6 +193,13 @@ const Results = () => {
             <VerdictBadge verdict={result.verdict} />
             <h2 className="mt-3 text-2xl font-bold">Result: {result.verdictLabel}</h2>
             <p className="mt-2">{result.message}</p>
+            {result.rejectionReasons?.length > 0 && (
+              <ul className="mt-3 list-disc space-y-1 pl-5 font-medium">
+                {result.rejectionReasons.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            )}
             <p className="mt-2 text-sm opacity-80">
               {Math.round(result.coverage * 100)}% of the verification checks could be run on this document.
             </p>

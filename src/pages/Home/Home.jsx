@@ -16,7 +16,8 @@ const PIPELINE = ['Upload', 'Preprocess', 'Classify', 'OCR', 'Extract', 'Structu
 const OUTCOMES = [
   { label: 'Verified', className: 'border-green-200 bg-green-50 text-green-900', text: 'Most checks passed and nothing suspicious was found.' },
   { label: 'Requires Review', className: 'border-amber-200 bg-amber-50 text-amber-900', text: 'The system cannot decide confidently, so a person should inspect it.' },
-  { label: 'Suspicious', className: 'border-red-200 bg-red-50 text-red-900', text: 'Checks point to manipulation, inconsistent data or a record mismatch.' },
+  { label: 'Suspicious', className: 'border-red-200 bg-red-50 text-red-900', text: 'Checks point to manipulation, inconsistent data, the wrong document type or a record mismatch.' },
+  { label: 'Rejected', className: 'border-gray-400 bg-gray-100 text-gray-900', text: 'Mandatory details are missing, the document is unreadable or it is not a supported document.' },
 ]
 
 export default function Home() {
@@ -72,8 +73,8 @@ export default function Home() {
       </section>
 
       <section className="py-12">
-        <h2 className="text-center text-3xl font-bold text-gray-900">Three clear outcomes</h2>
-        <div className="mt-8 grid gap-4 md:grid-cols-3">
+        <h2 className="text-center text-3xl font-bold text-gray-900">Four clear outcomes</h2>
+        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {OUTCOMES.map((outcome) => (
             <div key={outcome.label} className={`rounded-lg border p-6 ${outcome.className}`}>
               <h3 className="text-xl font-bold">{outcome.label}</h3>

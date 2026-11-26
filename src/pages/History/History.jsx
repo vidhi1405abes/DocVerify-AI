@@ -62,7 +62,7 @@ const History = () => {
         </Link>
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
         {[['all', 'Total', items.length], ...Object.keys(VERDICT_LABELS).map((key) => [key, VERDICT_LABELS[key], counts[key] ?? 0])].map(
           ([key, label, count]) => (
             <button
