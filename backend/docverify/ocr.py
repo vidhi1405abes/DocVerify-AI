@@ -15,9 +15,6 @@ from .textutils import ascii_digits
 # so it reads every text region first; regions it cannot read confidently (usually Hindi)
 # are read again by the Devanagari model, and the more confident reading is kept.
 HINDI_RETRY_BELOW = 0.5
-SMALL_IMAGE_SIDE = 1000
-SMALL_IMAGE_TARGET = 1600
-DETECTION_SETTINGS = {}
 
 _readers = {}
 _reader_lock = threading.Lock()
@@ -213,9 +210,7 @@ def preprocess(image):
     steps = []
     longest = max(image.shape[:2])
     if longest < 1400:
-        # Very small images (forwarded photos, thumbnails) are enlarged further so small print
-        # reaches a size the text detector can find.
-        factor = (SMALL_IMAGE_TARGET if longest < SMALL_IMAGE_SIDE else 1600) / longest
+        factor = 1600 / longest
         image = cv2.resize(image, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
         steps.append(f"Upscaled {factor:.1f}x for small text")
 
@@ -322,7 +317,7 @@ def _box_key(box):
 def _read_bilingual(image):
     """English reading of every region, with Hindi re-reading of regions English could not read."""
     reader = get_reader()
-    horizontal, free = reader.detect(image, **DETECTION_SETTINGS)
+    horizontal, free = reader.detect(image)
     horizontal, free = horizontal[0], free[0]
     if not horizontal and not free:
         return []
