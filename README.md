@@ -73,6 +73,18 @@ Copy `.env.example` values into your environment as needed:
 
 `backend/instance/` and stored references are excluded from Git.
 
+## Forgot your password?
+
+The app has no email service, so passwords are reset on the computer that runs the backend:
+
+```powershell
+python backend\manage.py list-users
+python backend\manage.py reset-password you@example.com
+```
+
+You are asked for the new password twice (the typing is hidden). `make-admin <email>` gives
+another account administrator rights.
+
 ## Authorized records
 
 Admins add records on the **Authorized records** page, one at a time or by CSV:
