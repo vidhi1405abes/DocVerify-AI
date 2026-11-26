@@ -233,7 +233,7 @@ const Results = () => {
             <Camera className="h-5 w-5" /> Get a clearer result
           </h2>
           <p className="mt-1 text-sm">
-            The image was cleaned up automatically, but some text was still hard to read. Upload it again after:
+            The image was cleaned up automatically, but some text was still hard to read. To get a reliable result:
           </p>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
             {result.photoTips.map((tip) => (

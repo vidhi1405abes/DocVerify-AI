@@ -3,7 +3,7 @@
 import re
 from difflib import SequenceMatcher, get_close_matches
 
-from .textutils import parse_date, to_digits, words_to_number
+from .textutils import DEVANAGARI, parse_date, to_digits, words_to_number
 
 NUMBER_WORDS = [
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
@@ -34,32 +34,126 @@ LABELS = {
     "gender": r"(?:gender|sex)",
     "district": r"district",
     "state": r"\bstate\b",
-    "candidateName": r"(?:candidate\W?s?\s*name|name\s*of\s*(?:the\s*)?(?:candidate|pupil|student|applicant))",
+    "applicationDate": r"(?:date\s*of\s*application|application\s*date)",
+    "candidateName": r"(?:candidate\W?s?\s*name|name\s*o[flt]\s*(?:the\s*)?(?:candidate|pupil|student|applic\w*))",
 }
+# Bilingual documents print "Name of Father" as well as "Father's Name".
+LABELS["fatherName"] = f"(?:{LABELS['fatherName']}|name\\s*o[flt]\\s*(?:the\\s*)?father)"
+LABELS["motherName"] = f"(?:{LABELS['motherName']}|name\\s*o[flt]\\s*(?:the\\s*)?mother)"
+
+# Hindi labels, matched approximately because Devanagari OCR drops or swaps vowel signs.
+HINDI_LABELS = {
+    "candidateName": ["आवेदक का नाम", "आवेदिका का नाम", "छात्र का नाम", "परीक्षार्थी का नाम", "अभ्यर्थी का नाम",
+                      "प्रमाणित किया जाता है कि", "नाम"],
+    "fatherName": ["पिता का नाम", "पिता/पति का नाम", "पिता / संरक्षक का नाम"],
+    "motherName": ["माता का नाम", "माँ का नाम"],
+    "dateOfBirth": ["जन्म तिथि", "जन्मतिथि", "जन्म दिनांक", "जन्म की तिथि"],
+    "rollNumber": ["अनुक्रमांक", "रोल नंबर", "रोल नं"],
+    "applicationNumber": ["आवेदन पत्र संख्या", "आवेदन संख्या"],
+    "certificateNumber": ["प्रमाण पत्र संख्या", "प्रमाण-पत्र संख्या", "प्रमाणपत्र संख्या", "प्रमाण पत्र क्रमांक"],
+    "issueDate": ["जारी करने की तिथि", "निर्गत तिथि", "निर्गमन तिथि", "निर्गत करने की तिथि"],
+    "applicationDate": ["आवेदन की तिथि", "आवेदन तिथि"],
+    "district": ["जिला"],
+    "state": ["राज्य"],
+    "school": ["विद्यालय"],
+}
+PARENT_WORDS = re.compile(r"पिता|माता|पति|माँ|father|mother|husband", re.IGNORECASE)
+HINDI_GENDER = {"पुरुष": "MALE", "महिला": "FEMALE", "स्त्री": "FEMALE", "ट्रांसजेंडर": "TRANSGENDER"}
 
 
 def _clean(value):
-    return re.sub(r"\s+", " ", value).strip(" :;,.-|")
+    return re.sub(r"\s+", " ", value).strip(" :;,.-|()")
+
+
+def _hindi_match(text, phrase):
+    """Best approximate match of a Hindi label in a line: (similarity, text after it)."""
+    tokens = text.split()
+    target = phrase.replace(" ", "")
+    size = len(phrase.split())
+    best = (0.0, None, "")
+    for count in sorted({max(1, size - 1), size, size + 1}):
+        for start in range(len(tokens) - count + 1):
+            window = re.sub(f"[^{DEVANAGARI}/]", "", "".join(tokens[start:start + count]))
+            if window:
+                score = SequenceMatcher(None, window, target).ratio()
+                if score > best[0]:
+                    best = (score, " ".join(tokens[start + count:]), window)
+    return best
+
+
+def _hindi_threshold(phrase):
+    # Short labels differ by a single letter (पिता / माता), so they must match more closely.
+    length = len(phrase.replace(" ", ""))
+    return 1.0 if length <= 4 else 0.85 if length <= 10 else 0.75
+
+
+def _best_other_label(window, key):
+    """How well the same piece of text matches any other label."""
+    return max((SequenceMatcher(None, window, phrase.replace(" ", "")).ratio()
+                for other, phrases in HINDI_LABELS.items() if other != key
+                for phrase in phrases if len(phrase.replace(" ", "")) > 4), default=0.0)
+
+
+def _drop_label_prefix(value):
+    """'Falhet $ Guamtlin 5 Naine ANUJ KUMAR' -> 'ANUJ KUMAR': a garbled English label before the value."""
+    tokens = value.split()
+    for index in range(min(len(tokens) - 1, 6) - 1, -1, -1):
+        word = re.sub(r"[^a-z]", "", tokens[index].lower())
+        if word and get_close_matches(word, ["name", "names"], n=1, cutoff=0.6):
+            return " ".join(tokens[index + 1:])
+    return value
 
 
 def find_labelled(lines, key):
-    """Text that follows a label on the same line (or the next line if empty)."""
-    pattern = re.compile(LABELS[key] + r"\W*(.*)", re.IGNORECASE)
+    """Text that follows a label (English first, then Hindi) on the same line or the next one."""
+    pattern = re.compile(LABELS[key] + r"\W*(.*)", re.IGNORECASE) if key in LABELS else None
     for index, line in enumerate(lines):
-        match = pattern.search(line.text)
+        match = pattern.search(line.text) if pattern else None
         if match:
             value = _clean(match.group(1))
             if not value and index + 1 < len(lines):
                 value = _clean(lines[index + 1].text)
             if value:
                 return value, line
+    for phrase in HINDI_LABELS.get(key, []):
+        for index, line in enumerate(lines):
+            # The bare word "नाम" (name) also appears in "पिता का नाम" (father's name).
+            if key == "candidateName" and PARENT_WORDS.search(line.text):
+                continue
+            score, remainder, window = _hindi_match(line.text, phrase)
+            # Text belongs to the label it matches best: "आवेदन पत्र संख्या" is not "प्रमाण पत्र संख्या".
+            if score < _hindi_threshold(phrase) or _best_other_label(window, key) > score:
+                continue
+            value = _clean(remainder)
+            if not value and index + 1 < len(lines):
+                # Bilingual layouts print the Hindi label on one line, English label and value below.
+                value = _clean(lines[index + 1].text)
+            if value:
+                return _drop_label_prefix(value), line
     return None, None
 
 
+def _place(value):
+    """'पूर्वी चंपारण / PURBI CHAMPARAN' -> 'PURBI CHAMPARAN'; Hindi when no English is printed."""
+    if not value:
+        return None
+    parts = [p.strip() for p in value.split("/") if p.strip()]
+    latin = [p for p in parts if len(re.sub(r"[^A-Za-z]", "", p)) >= 3]
+    chosen = latin[-1] if latin else parts[-1] if parts else value
+    return _clean(chosen).upper()[:60] or None
+
+
 def _name(value):
-    cleaned = _clean(NAME_NOISE.sub(" ", value or ""))
-    words = [w for w in cleaned.split() if len(w) > 1 or w.isalpha()]
-    return " ".join(words[:5]).upper() if len(cleaned) >= 3 else None
+    """A person's name from a label's value: the English spelling if printed, else the Hindi one."""
+    if not value:
+        return None
+    bracketed = re.findall(r"\(\s*([A-Za-z .']{3,})(?:\)|$)", value)
+    latin = _clean(NAME_NOISE.sub(" ", bracketed[-1] if bracketed else value))
+    words = [w for w in latin.split() if len(w) > 1 or w.isalpha()]
+    if len("".join(words)) >= 3:
+        return " ".join(words[:5]).upper()
+    hindi = re.findall(f"[{DEVANAGARI}]+", value)
+    return " ".join(hindi[:5]) if len("".join(hindi)) >= 3 else None
 
 
 def _identifier(value, min_digits=5):
@@ -68,6 +162,16 @@ def _identifier(value, min_digits=5):
     run = re.search(r"\d[\dOoIlSB]{%d,}" % (min_digits - 1), value)
     digits = to_digits(run.group(0)) if run else None
     return digits if digits and len(digits) >= min_digits else None
+
+
+def _reference_id(value):
+    """Certificate / application numbers such as BRCCO/2025/16165120 or DOM-2024-00123."""
+    if not value:
+        return None
+    for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9/\-]{4,}", value):
+        if sum(ch.isdigit() for ch in token) >= 4:
+            return token.upper().strip("/-")
+    return _identifier(value)
 
 
 def _confidence(line, text):
@@ -254,9 +358,12 @@ def extract_fields(document_type, ocr):
                 put("name", _name(match.group(1)), line)
                 break
 
-    for key in ("rollNumber", "applicationNumber", "admissionNumber", "certificateNumber", "serialNumber"):
+    for key in ("rollNumber", "admissionNumber", "serialNumber"):
         value, line = find_labelled(lines, key)
         put(key, _identifier(value, 4 if key == "serialNumber" else 5), line)
+    for key in ("applicationNumber", "certificateNumber"):
+        value, line = find_labelled(lines, key)
+        put(key, _reference_id(value), line)
 
     for key in ("motherName", "fatherName"):
         value, line = find_labelled(lines, key)
@@ -276,7 +383,7 @@ def extract_fields(document_type, ocr):
         elif worded:
             put("dateOfBirthInWords", worded.isoformat(), line)
 
-    for key in ("admissionDate", "leavingDate", "issueDate"):
+    for key in ("admissionDate", "leavingDate", "issueDate", "applicationDate"):
         value, line = find_labelled(lines, key)
         parsed = parse_date(value) if value else None
         put(key, parsed.isoformat() if parsed else None, line)
@@ -284,9 +391,11 @@ def extract_fields(document_type, ocr):
     value, line = find_labelled(lines, "school")
     put("school", _clean(value).upper() if value and len(value) > 4 else None, line)
 
-    for key in ("district", "state", "class"):
+    for key in ("district", "state"):
         value, line = find_labelled(lines, key)
-        put(key, _clean(value).upper()[:60] if value else None, line)
+        put(key, _place(value), line)
+    value, line = find_labelled(lines, "class")
+    put("class", _clean(value).upper()[:60] if value else None, line)
 
     board = _first(r"(central board of secondary education|board of [a-z ]+education|national testing agency|"
                    r"unique identification authority of india|government of [a-z ]+)", text)
@@ -309,6 +418,8 @@ def extract_fields(document_type, ocr):
     if not gender and document_type == "aadhaar":
         # OCR often glues a stray letter on, e.g. "MMALE"; check "female" before "male".
         gender = _first(r"(female|male|transgender)", text)
+    if not gender:
+        gender = next((english for hindi, english in HINDI_GENDER.items() if hindi in text), None)
     put("gender", gender.upper() if gender else None)
 
     full_aadhaar = re.search(r"\b([2-9]\d{3})\s?(\d{4})\s?(\d{4})\b", text)

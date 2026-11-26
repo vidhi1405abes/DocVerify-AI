@@ -6,7 +6,7 @@ from pathlib import Path
 
 from . import classify, consistency, extract, ocr, qr, tamper
 from .config import SUPPORTED_EXTENSIONS
-from .doc_types import DOCUMENT_TYPES, FIELD_LABELS
+from .doc_types import DOCUMENT_TYPES, FIELD_LABELS, required_label, required_present
 from .textutils import normalized_text, similarity
 
 # How much each layer counts towards the risk score.
@@ -53,9 +53,17 @@ def _layer(key, name, status, details, critical=False, extra=None):
     return layer
 
 
-def read_document(file_bytes, extension):
-    """Load, preprocess and OCR a document. Returns (ocr result, colour pages, steps, pdf metadata)."""
-    pages, metadata = ocr.load_pages(file_bytes, extension)
+def read_document(file_bytes, extension, password=None):
+    """Load, preprocess and read a document. Returns (ocr result, colour pages, steps, pdf metadata).
+
+    A digital PDF (e.g. from DigiLocker) is read from its embedded text: exact, with no OCR.
+    """
+    pages, metadata, embedded = ocr.load_pages(file_bytes, extension, password)
+    if embedded:
+        result = ocr.from_text(embedded)
+        result.digital = True
+        steps = ["Read the digital text embedded in the PDF (exact, no OCR needed)"]
+        return result, pages, steps, metadata
     result, colours, steps = ocr.OcrResult(), [], []
     confidences = []
     tips = ocr.photo_quality_tips(pages[0])
@@ -86,7 +94,7 @@ def reference_text(path):
     if cache.exists():
         return cache.read_text(encoding="utf8")
     try:
-        result, _, _, _ = read_document(path.read_bytes(), path.suffix.lower())
+        result, _, _, _ = read_document(path.read_bytes(), path.suffix.lower())  # password PDFs: skipped
         text = result.text
     except ocr.UnreadableDocument:
         text = ""
@@ -177,15 +185,20 @@ def classification_layer(selected, text, reference_texts, fields):
 
 def structure_layer(document_type, fields):
     required = DOCUMENT_TYPES[document_type]["required"]
-    present = [f for f in required if fields.get(f)]
-    missing = [f for f in required if not fields.get(f)]
-    details = [f"{FIELD_LABELS[f]}: present" for f in present] + [f"{FIELD_LABELS[f]}: missing" for f in missing]
+    present = [f for f in required if required_present(f, fields)]
+    missing = [f for f in required if not required_present(f, fields)]
+    details = ([f"{required_label(f)}: present" for f in present]
+               + [f"{required_label(f)}: missing" for f in missing])
     if document_type.startswith("marksheet") and fields.get("subjects"):
         details.append(f"{len(fields['subjects'])} subject rows found in the marks table.")
-    extra = {"present": len(present), "required": len(required), "missing": [FIELD_LABELS[f] for f in missing]}
+    extra = {"present": len(present), "required": len(required), "missing": [required_label(f) for f in missing]}
     if not missing:
+        if document_type == "domicile" and not fields.get("certificateNumber"):
+            details.insert(0, "This is an application for a domicile certificate, not the issued certificate: "
+                              "it has an application number but no certificate number.")
+            return _layer("structure", "Structure & required fields", "warn", details, extra=extra)
         return _layer("structure", "Structure & required fields", "pass", details, extra=extra)
-    missing_labels = ", ".join(FIELD_LABELS[f] for f in missing)
+    missing_labels = ", ".join(required_label(f) for f in missing)
     extra["rejection"] = f"Mandatory field(s) missing: {missing_labels}."
     details.insert(0, f"Mandatory field(s) missing: {missing_labels}. If they are printed on the document, "
                       "upload a clearer scan.")
@@ -245,8 +258,14 @@ def consistency_layer(document_type, fields):
 
 
 def tampering_layer(colour_pages, result, file_bytes, extension, metadata):
-    analysis = tamper.analyse(colour_pages[0], result.lines, file_bytes, extension, metadata)
+    signed = extension == ".pdf" and ocr.has_digital_signature(file_bytes)
+    # Print-style comparison needs OCR boxes; text read from a digital PDF has none.
+    lines = [] if result.digital else result.lines
+    analysis = tamper.analyse(colour_pages[0], lines, file_bytes, extension, metadata, signed=signed)
     details = list(analysis["metadataFindings"])
+    if signed:
+        details.append("The PDF carries a digital signature (as DigiLocker and e-Aadhaar PDFs do). "
+                       "The signing certificate is not validated offline.")
     for value in analysis["suspiciousValues"]:
         details.append(f"Printed value \"{value['text']}\" differs from the values around it in "
                        f"{' and '.join(value['reasons'])}.")
@@ -259,6 +278,8 @@ def tampering_layer(colour_pages, result, file_bytes, extension, metadata):
     if analysis["valuesCompared"] >= 8:
         details.append(f"{analysis['valuesCompared']} printed values compared for size, ink and background: "
                        "none stand out.")
+    elif result.digital:
+        details.append("File metadata shows no editing software.")
     else:
         details.append("File metadata shows no editing software. Too few printed values to compare "
                        "their print characteristics.")
@@ -413,9 +434,10 @@ def score(layers):
     return verdict, risk, round(coverage, 2), rejections
 
 
-def run(document_type, file_bytes, extension, filename, reference_root, records, previous=None):
+def run(document_type, file_bytes, extension, filename, reference_root, records, previous=None,
+        password=None):
     """Verify one document. `previous` holds earlier verified results of the same type."""
-    result, colour_pages, steps, metadata = read_document(file_bytes, extension)
+    result, colour_pages, steps, metadata = read_document(file_bytes, extension, password)
     fields, field_confidence = extract.extract_fields(document_type, result)
 
     layers = [ocr_layer(result)]

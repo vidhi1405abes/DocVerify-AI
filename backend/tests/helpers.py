@@ -18,6 +18,26 @@ def make_png():
     return image.getvalue()
 
 
+def make_text_pdf(text, password=None):
+    """A digital PDF with real embedded text, like those issued through DigiLocker."""
+    from reportlab.pdfgen import canvas
+
+    pdf = io.BytesIO()
+    page = canvas.Canvas(pdf, encrypt=password) if password else canvas.Canvas(pdf)
+    y = 800
+    for line in text.strip().splitlines():
+        page.drawString(40, y, line)
+        y -= 16
+    page.save()
+    return pdf.getvalue()
+
+
+def make_webp(width=800, height=1000):
+    image = io.BytesIO()
+    Image.new("RGB", (width, height), "white").save(image, format="WEBP")
+    return image.getvalue()
+
+
 def fake_ocr(text, confidence=0.99):
     """An OCR result where every whitespace-separated token is one word box."""
     lines = []
@@ -34,7 +54,7 @@ def fake_ocr(text, confidence=0.99):
 def fake_read_document(text, confidence=0.99):
     page = np.full((600, 800, 3), 255, dtype=np.uint8)
 
-    def read_document(_file_bytes, _extension):
+    def read_document(_file_bytes, _extension, _password=None):
         return fake_ocr(text, confidence), [page], [], {}
 
     return read_document

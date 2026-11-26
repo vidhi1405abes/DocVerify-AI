@@ -31,6 +31,8 @@ const Verify = () => {
   const [error, setError] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [step, setStep] = useState(0)
+  const [password, setPassword] = useState('')
+  const [needsPassword, setNeedsPassword] = useState(false)
 
   const selected = types.find((type) => type.id === documentType)
 
@@ -68,6 +70,8 @@ const Verify = () => {
       return
     }
     setError('')
+    setPassword('')
+    setNeedsPassword(false)
     setFile(candidate)
   }
 
@@ -79,11 +83,13 @@ const Verify = () => {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('documentType', selected.id)
+    if (password) formData.append('password', password)
     try {
       const result = await verifyDocument(formData)
       navigate(`/results/${result.id}`)
     } catch (verifyError) {
       setError(verifyError.message)
+      if (/password/i.test(verifyError.message)) setNeedsPassword(true)
       setVerifying(false)
     }
   }
@@ -165,9 +171,9 @@ const Verify = () => {
               <p className="mt-2 text-sm text-blue-800">{selected.description}</p>
               <p className="mt-1 text-sm text-blue-700">Accepted formats: {formatsLabel(selected)} · up to 15 MB</p>
               <p className="mt-2 text-sm text-blue-800">
-                <span className="font-medium">For the best result:</span> photograph the whole document flat, in good
-                light, without glare or shadows, and upload the original photo or a scan. Photos forwarded on
-                WhatsApp are shrunk and blurred; send them as a document instead.
+                <span className="font-medium">For the best result</span>, ask senders for the DigiLocker PDF (read
+                exactly, no OCR needed) or for the photo shared on WhatsApp as a <em>Document</em>, not as a photo:
+                WhatsApp shrinks photos and small print becomes unreadable. Hindi and English text are both read.
               </p>
               <p className="mt-1 text-sm text-blue-700">Must contain: {selected.requiredFields.join(', ')}</p>
             </div>
@@ -211,6 +217,25 @@ const Verify = () => {
           </div>
 
           {file && <Message type="success" className="mt-4">Selected: {file.name}</Message>}
+          {file?.name.toLowerCase().endsWith('.pdf') && (
+            <label className="mt-4 block text-sm font-medium text-gray-700">
+              PDF password {needsPassword ? '(required)' : '(only if the PDF is protected)'}
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoFocus={needsPassword}
+                autoComplete="off"
+                className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+                  needsPassword ? 'border-amber-400' : 'border-gray-300'
+                }`}
+              />
+              <span className="mt-1 block text-xs font-normal text-gray-500">
+                e-Aadhaar: first 4 letters of the name in capitals + year of birth (e.g. RAHU1990). DigiLocker
+                PDFs usually have no password.
+              </span>
+            </label>
+          )}
           <Message className="mt-4">{error}</Message>
 
           <button

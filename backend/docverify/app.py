@@ -32,14 +32,18 @@ def _read_upload(document_type):
     extension = Path(uploaded.filename).suffix.lower()
     allowed = DOCUMENT_TYPES[document_type]["formats"]
     if extension not in SUPPORTED_EXTENSIONS:
-        return None, json_error("Upload a PDF, JPG, JPEG, or PNG document.", 400)
+        return None, json_error("Upload a PDF, JPG, JPEG, PNG or WebP document.", 400)
     if extension not in allowed:
         return None, json_error(f"{DOCUMENT_TYPES[document_type]['name']} documents must be PDF files.", 400)
 
     file_bytes = uploaded.read(MAX_UPLOAD_BYTES + 1)
     if len(file_bytes) > MAX_UPLOAD_BYTES:
         return None, json_error("File exceeds the 15 MB upload limit.", 413)
-    if not ocr.is_readable(file_bytes, extension):
+    try:
+        ocr.check_readable(file_bytes, extension, request.form.get("password"))
+    except ocr.PasswordRequired as error:
+        return None, (jsonify({"error": str(error), "passwordRequired": True}), 400)
+    except ocr.UnreadableDocument:
         kind = "PDF" if extension == ".pdf" else "image"
         return None, json_error(f"The selected file is not a readable {kind}.", 400)
     return (file_bytes, extension, secure_filename(uploaded.filename) or f"document{extension}"), None
@@ -143,7 +147,7 @@ def create_app(reference_root=None, database_url=None):
         file_bytes, extension, filename = upload
         result = engine.run(document_type, file_bytes, extension, filename,
                             app.config["REFERENCE_ROOT"], _records_for(document_type),
-                            _verified_results(document_type))
+                            _verified_results(document_type), password=request.form.get("password"))
 
         with app.config["DB"]() as session:
             verification = Verification(

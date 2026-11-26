@@ -165,7 +165,7 @@ def image_metadata_findings(file_bytes):
     return []
 
 
-def pdf_metadata_findings(metadata):
+def pdf_metadata_findings(metadata, signed=False):
     findings = []
     producer = " ".join(str(metadata.get(key, "")) for key in ("Producer", "Creator")).strip()
     match = EDITING_TOOLS.search(producer)
@@ -173,14 +173,15 @@ def pdf_metadata_findings(metadata):
         findings.append(f"PDF was produced or edited with {match.group(0)} ({producer}).")
     created = str(metadata.get("CreationDate", ""))[:16]
     modified = str(metadata.get("ModDate", ""))[:16]
-    if created and modified and created != modified:
+    # Signing a PDF (DigiLocker, e-Aadhaar) changes its modification date, so that is expected.
+    if created and modified and created != modified and not signed:
         findings.append("PDF was modified after it was first created.")
     return findings
 
 
-def analyse(color_page, lines, file_bytes, extension, pdf_metadata):
+def analyse(color_page, lines, file_bytes, extension, pdf_metadata, signed=False):
     metadata_findings = (
-        pdf_metadata_findings(pdf_metadata) if extension == ".pdf" else image_metadata_findings(file_bytes)
+        pdf_metadata_findings(pdf_metadata, signed) if extension == ".pdf" else image_metadata_findings(file_bytes)
     )
     first_page_lines = [line for line in lines if line.page == 0]
     values = find_inconsistent_values(color_page, first_page_lines)

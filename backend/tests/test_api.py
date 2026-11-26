@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from docverify.app import create_app
 from tests.helpers import (GENUINE_MARKSHEET, TAMPERED_MARKSHEET, fake_read_document, make_pdf,
-                           make_png)
+                           make_png, make_text_pdf, make_webp)
 
 
 class ApiTestCase(unittest.TestCase):
@@ -145,6 +145,60 @@ class VerificationTests(ApiTestCase):
         invalid = self.verify(self.user, GENUINE_MARKSHEET, data=b"not a pdf")
         self.assertEqual(unknown.status_code, 400)
         self.assertEqual(invalid.status_code, 400)
+
+    def upload_real(self, account, data, filename, document_type="marksheet10", password=None):
+        """Verify without faking OCR, for files that need no OCR (digital PDFs)."""
+        form = {"documentType": document_type, "file": (io.BytesIO(data), filename)}
+        if password:
+            form["password"] = password
+        return self.client.post("/documents/verify", data=form, content_type="multipart/form-data",
+                                headers=self.headers(account))
+
+    def test_digital_pdf_is_read_from_its_embedded_text(self):
+        response = self.upload_real(self.user, make_text_pdf(GENUINE_MARKSHEET), "digilocker.pdf")
+        self.assertEqual(response.status_code, 201, response.json)
+        result = self.result(self.user, response)
+        self.assertIn("embedded in the PDF", result["preprocessing"][0])
+        fields = {f["key"]: f["value"] for f in result["fields"]}
+        self.assertEqual(fields["rollNumber"], "25147975")
+        self.assertEqual(result["verdict"], "verified", result["layers"])
+
+    def test_password_protected_pdf_needs_its_password(self):
+        protected = make_text_pdf(GENUINE_MARKSHEET, password="RAHU1990")
+        missing = self.upload_real(self.user, protected, "eaadhaar.pdf")
+        self.assertEqual(missing.status_code, 400)
+        self.assertTrue(missing.json["passwordRequired"])
+        self.assertIn("first 4 letters", missing.json["error"])
+        wrong = self.upload_real(self.user, protected, "eaadhaar.pdf", password="WRONG123")
+        self.assertIn("incorrect", wrong.json["error"])
+        right = self.upload_real(self.user, protected, "eaadhaar.pdf", password="RAHU1990")
+        self.assertEqual(right.status_code, 201, right.json)
+
+    def test_accepts_webp_images(self):
+        response = self.verify(self.user, GENUINE_MARKSHEET, filename="whatsapp.webp", data=make_webp())
+        self.assertEqual(response.status_code, 201, response.json)
+
+    def test_bilingual_domicile_application_is_read(self):
+        text = """आवेदन पत्र संख्या BRCC0/2025/16165120 आबेदन को तिथि 17/07/2025
+2. आवेदिका का नाग (Name ol Applicant) सोनालिका ट्रेव्टर ( Sonalika Traclor)
+3. लिग / Gender H Female
+थिता का नाम (Name ol Father) सचराज ट्रैक्टर (Sawraj Taractor)
+6. माता का नाम (Name ot Mother) कार &rig (Car Devi)
+9. राज्य / Staie eR? / Bihar
+10.जिला District पूर्वी चंपारण / PURBI CHAMPARAN
+निवास प्रमाण पत्र हेतु आवेदन पत्र स्थायी निवासी"""
+        result = self.result(self.user, self.verify(self.user, text, document_type="domicile"))
+        fields = {f["key"]: f["value"] for f in result["fields"]}
+        self.assertEqual(fields["name"], "SONALIKA TRACLOR")
+        self.assertEqual(fields["fatherName"], "SAWRAJ TARACTOR")
+        self.assertEqual(fields["motherName"], "CAR DEVI")
+        self.assertEqual(fields["applicationNumber"], "BRCC0/2025/16165120")
+        self.assertEqual(fields["applicationDate"], "2025-07-17")
+        self.assertEqual(fields["state"], "BIHAR")
+        self.assertNotIn("certificateNumber", fields)
+        structure = self.layer(result, "structure")
+        self.assertEqual(structure["status"], "warn")
+        self.assertIn("application for a domicile certificate", structure["details"][0])
 
     def test_genuine_marksheet_is_verified_with_extracted_fields(self):
         result = self.result(self.user, self.verify(self.user, GENUINE_MARKSHEET))

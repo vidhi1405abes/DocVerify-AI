@@ -32,7 +32,20 @@ supported document; *Suspicious* (risk 70+) for the wrong document type, inconsi
 mismatch; *Requires Review* for risk 25–54; *Verified* below 25. Times are shown in IST.
 
 Supported types: 10th and 12th marksheets, JEE result, transfer certificate, domicile
-certificate and Aadhaar card.
+certificate (or application) and Aadhaar card. Files: PDF, JPG, PNG and WebP.
+
+## Built for Indian documents
+
+- **Hindi + English.** Every text region is read by the English model; regions it cannot read
+  confidently (usually Hindi) are re-read by the Devanagari model, and the better reading is kept.
+  Hindi labels (नाम, पिता का नाम, जन्म तिथि, अनुक्रमांक, प्रमाण पत्र संख्या…), Hindi gender words and
+  Devanagari digits (२०२०) are understood. Bilingual values keep the English spelling when printed.
+- **Digital PDFs (DigiLocker, e-Aadhaar)** are read from their embedded text: exact, with no OCR.
+  Password-protected PDFs are supported (e-Aadhaar: first 4 letters of the name in capitals + year
+  of birth), and a digital signature is reported when present.
+- **Forwarded photos.** Small or blurry images are enlarged, cleaned up and read twice; when text
+  is still unreadable the result says what to ask the sender for (share on WhatsApp as a
+  *Document*, or send the DigiLocker PDF).
 
 ## Tech stack
 
@@ -61,9 +74,9 @@ Open http://localhost:5173 and create an account. **The first account becomes th
 administrator**, who manages reference documents and authorized records; later accounts
 can verify documents and see their own history.
 
-The first verification after starting the backend takes 1–2 minutes while EasyOCR loads
-(and, the very first time, downloads) its model. After that a document takes about 10
-seconds on CPU.
+The first verification after starting the backend takes 1–2 minutes while EasyOCR loads its
+models. The very first time it also downloads them (English ~100 MB, Hindi ~215 MB). After
+that a document takes about 10–40 seconds on CPU, depending on how much Hindi text it has.
 
 ## Configuration
 

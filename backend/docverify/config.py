@@ -8,7 +8,7 @@ INSTANCE_DIR = BACKEND_DIR / "instance"
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 MAX_PDF_PAGES = 5
 TOKEN_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
-SUPPORTED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
+SUPPORTED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
 # The Vite dev server moves to 5174, 5175... when 5173 is busy, so accept any local port.
 ALLOWED_ORIGINS = [r"^http://(localhost|127\.0\.0\.1):\d+$"]
 

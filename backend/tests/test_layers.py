@@ -11,6 +11,21 @@ from docverify.textutils import parse_date, verhoeff_valid, words_to_number
 from tests.helpers import GENUINE_MARKSHEET, TAMPERED_MARKSHEET, fake_ocr
 
 
+class HindiTextTests(unittest.TestCase):
+    def test_hindi_names_compare_by_their_letters(self):
+        from docverify.textutils import ascii_digits, similarity
+
+        self.assertLess(similarity("राम कुमार", "सीता देवी"), 0.5)
+        self.assertEqual(similarity("राम कुमार", "राम  कुमार"), 1.0)
+        self.assertEqual(ascii_digits("२०२०"), "2020")
+
+    def test_detects_digital_signature_markers(self):
+        from docverify.ocr import has_digital_signature
+
+        self.assertTrue(has_digital_signature(b"%PDF /Type /Sig /ByteRange [0 10 20 30] /adbe.pkcs7.detached"))
+        self.assertFalse(has_digital_signature(b"%PDF plain document"))
+
+
 class TextUtilityTests(unittest.TestCase):
     def test_words_to_number(self):
         self.assertEqual(words_to_number("SEVENTY NINE"), 79)
@@ -65,6 +80,21 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(fields["dateOfBirth"], "1979-07-27")
         self.assertEqual(fields["gender"], "MALE")
         self.assertEqual(classify.type_evidence(text)[0], "aadhaar")
+
+    def test_reads_hindi_only_labels_and_values(self):
+        text = ("नाम : राम कुमार\nपिता का नाम : श्याम लाल\nजन्म तिथि : १५/०८/२००५\nलिंग : पुरुष\n"
+                "अनुक्रमांक : २५१४७९७५")
+        fields, _ = extract_fields("marksheet10", fake_ocr(text))
+        self.assertEqual(fields["name"], "राम कुमार")
+        self.assertEqual(fields["fatherName"], "श्याम लाल")
+        self.assertEqual(fields["dateOfBirth"], "2005-08-15")
+        self.assertEqual(fields["gender"], "MALE")
+        self.assertEqual(fields["rollNumber"], "25147975")
+
+    def test_hindi_label_on_line_above_english_value(self):
+        text = "पिता / सरयक का नाग\nFalhet $ Guamtlin 5 Naine ANUJ KUMAR\nसाताफ नाम"
+        fields, _ = extract_fields("marksheet10", fake_ocr(text))
+        self.assertEqual(fields["fatherName"], "ANUJ KUMAR")
 
     def test_extracts_aadhaar_fields(self):
         text = "Government of India\nVIDHI SHARMA\nDOB: 14/06/2001\nFEMALE\n2341 2341 2346"

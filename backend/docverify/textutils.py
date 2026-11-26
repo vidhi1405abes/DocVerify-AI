@@ -43,14 +43,28 @@ DIGIT_LOOKALIKES = str.maketrans({"O": "0", "o": "0", "D": "0", "Q": "0", "I": "
                                   "z": "2", "G": "6", "g": "9"})
 
 
+DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
+DEVANAGARI = "ऀ-ॿ"
+
+
+def ascii_digits(text):
+    """Hindi documents often print numbers in Devanagari digits (२०२०); read them as 2020."""
+    return text.translate(DEVANAGARI_DIGITS)
+
+
+def has_devanagari(text):
+    return bool(re.search(f"[{DEVANAGARI}]", text or ""))
+
+
 def normalized_text(text):
-    return re.sub(r"[^a-z0-9]", "", text.casefold())
+    """Lower-case letters and digits only, keeping Hindi letters so Hindi values still compare."""
+    return re.sub(f"[^a-z0-9{DEVANAGARI}]", "", ascii_digits(text).casefold())
 
 
 def to_digits(token):
     """Read a token that should be numeric, fixing common OCR look-alikes."""
-    cleaned = token.strip().translate(DIGIT_LOOKALIKES)
-    return cleaned if re.fullmatch(r"\d+", cleaned) else None
+    cleaned = ascii_digits(token.strip()).translate(DIGIT_LOOKALIKES)
+    return cleaned if re.fullmatch(r"[0-9]+", cleaned) else None
 
 
 def words_to_number(text):
